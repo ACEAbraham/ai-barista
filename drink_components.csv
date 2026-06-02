@@ -1,0 +1,31 @@
+base,milk,syrup,toppings,size,shots,temperature,ice_level
+Latte,whole,vanilla,whipped cream,tall,2,hot,none
+Latte,oat,brown sugar,cinnamon,grande,2,iced,light
+Latte,almond,caramel,caramel drizzle,venti,3,iced,regular
+Cold Brew,none,vanilla,cold foam,tall,0,iced,regular
+Cold Brew,oat,brown sugar,cinnamon,grande,0,iced,light
+Cold Brew,coconut,caramel,cold foam,venti,0,iced,extra
+Mocha,whole,mocha,whipped cream,tall,2,hot,none
+Mocha,oat,peppermint,chocolate curls,grande,2,iced,regular
+Mocha,soy,white mocha,cold foam,venti,3,iced,light
+Matcha Latte,whole,none,none,tall,0,hot,none
+Matcha Latte,oat,vanilla,cold foam,grande,0,iced,regular
+Matcha Latte,coconut,raspberry,strawberry pieces,venti,0,iced,extra
+Chai Latte,2%,none,cinnamon,tall,0,hot,none
+Chai Latte,oat,brown sugar,cinnamon,grande,0,iced,light
+Chai Latte,soy,vanilla,cold foam,venti,0,iced,regular
+Americano,none,none,none,tall,2,hot,none
+Americano,oat,cinnamon dolce,cinnamon,grande,2,iced,regular
+Americano,coconut,vanilla,cold foam,venti,3,iced,extra
+Cappuccino,whole,none,cinnamon,tall,2,hot,none
+Cappuccino,nonfat,vanilla,cocoa powder,grande,2,hot,none
+Cappuccino,oat,caramel,caramel drizzle,venti,3,iced,light
+Frappuccino,whole,mocha,whipped cream,tall,0,blended,regular
+Frappuccino,oat,caramel,caramel drizzle,grande,0,blended,regular
+Frappuccino,almond,vanilla,cold foam,venti,0,blended,extra
+Refresher,none,raspberry,strawberry pieces,tall,0,iced,regular
+Refresher,coconut,raspberry,strawberry pieces,grande,0,iced,extra
+Refresher,none,peppermint,none,venti,0,iced,light
+Herbal Tea,none,none,none,tall,0,hot,none
+Herbal Tea,none,vanilla,lemon,grande,0,hot,none
+Herbal Tea,coconut,raspberry,strawberry pieces,venti,0,iced,light

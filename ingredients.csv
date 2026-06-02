@@ -1,0 +1,40 @@
+ingredient_id,ingredient_name,category,calories,caffeine,price
+ING-001,Espresso Shot,base,5,75,0.60
+ING-002,Cold Brew Base,base,15,155,1.20
+ING-003,Matcha Scoop,base,35,70,0.95
+ING-004,Chai Concentrate,base,80,50,0.85
+ING-005,Herbal Tea Infusion,base,5,0,0.55
+ING-006,Refresher Base,base,60,35,0.90
+ING-007,Whole Milk,milk,75,0,0.35
+ING-008,2% Milk,milk,60,0,0.35
+ING-009,Nonfat Milk,milk,40,0,0.35
+ING-010,Oat Milk,milk,80,0,0.70
+ING-011,Almond Milk,milk,35,0,0.70
+ING-012,Soy Milk,milk,65,0,0.70
+ING-013,Coconut Milk,milk,55,0,0.70
+ING-014,Water,water,0,0,0.00
+ING-015,Vanilla Syrup,syrup,60,0,0.60
+ING-016,Caramel Syrup,syrup,80,0,0.60
+ING-017,Hazelnut Syrup,syrup,70,0,0.60
+ING-018,Mocha Sauce,syrup,90,5,0.60
+ING-019,White Mocha Sauce,syrup,110,0,0.70
+ING-020,Brown Sugar Syrup,syrup,75,0,0.60
+ING-021,Cinnamon Dolce Syrup,syrup,80,0,0.60
+ING-022,Peppermint Syrup,syrup,65,0,0.60
+ING-023,Raspberry Syrup,syrup,70,0,0.60
+ING-024,Whipped Cream,topping,80,0,0.75
+ING-025,Cold Foam,topping,45,0,0.75
+ING-026,Cinnamon Powder,topping,5,0,0.15
+ING-027,Caramel Drizzle,topping,50,0,0.50
+ING-028,Chocolate Curls,topping,45,0,0.50
+ING-029,Strawberry Pieces,topping,25,0,0.50
+ING-030,Lemon Slice,topping,5,0,0.20
+ING-031,Tall Cup,size,0,0,0.00
+ING-032,Grande Cup,size,0,0,0.55
+ING-033,Venti Cup,size,0,0,1.00
+ING-034,Hot Preparation,temperature,0,0,0.00
+ING-035,Iced Preparation,temperature,0,0,0.00
+ING-036,Blended Preparation,temperature,25,0,0.65
+ING-037,Light Ice,ice,0,0,0.00
+ING-038,Regular Ice,ice,0,0,0.00
+ING-039,Extra Ice,ice,0,0,0.00

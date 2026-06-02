@@ -1,0 +1,346 @@
+"""Ingredient-based drink building for AI Barista."""
+
+from pathlib import Path
+
+import pandas as pd
+
+
+INGREDIENTS_FILE = Path(__file__).with_name("ingredients.csv")
+RECIPES_FILE = Path(__file__).with_name("drink_recipes.csv")
+CUSTOM_DRINKS_FILE = Path(__file__).with_name("custom_drinks.csv")
+PREFERENCES_FILE = Path(__file__).with_name("ingredient_preferences.csv")
+RATINGS_FILE = Path(__file__).with_name("ratings.csv")
+
+RECIPE_COLUMNS = ["drink_id", "ingredient_id", "quantity"]
+PREFERENCE_COLUMNS = ["user_id", "ingredient_id", "preference_score"]
+
+FLAVOR_WEIGHTS = {
+    "base": 3,
+    "milk": 2,
+    "syrup": 2,
+    "topping": 1,
+    "temperature": 1,
+}
+
+
+def load_ingredients() -> pd.DataFrame:
+    """Load all available ingredients."""
+    return pd.read_csv(INGREDIENTS_FILE)
+
+
+def load_recipes() -> pd.DataFrame:
+    """Load saved drink recipes."""
+    if RECIPES_FILE.exists():
+        return pd.read_csv(RECIPES_FILE)
+    return pd.DataFrame(columns=RECIPE_COLUMNS)
+
+
+def load_ingredient_preferences() -> pd.DataFrame:
+    """Load ingredient preference scores."""
+    if PREFERENCES_FILE.exists():
+        return pd.read_csv(PREFERENCES_FILE)
+    return pd.DataFrame(columns=PREFERENCE_COLUMNS)
+
+
+def _rating_adjustment(rating: int) -> int:
+    """Convert a drink rating into an ingredient preference adjustment."""
+    if rating >= 5:
+        return 3
+    if rating == 4:
+        return 2
+    if rating == 3:
+        return 0
+    if rating == 2:
+        return -2
+    return -3
+
+
+def update_ingredient_preferences(user_id: str, drink_id: str, rating: int) -> pd.DataFrame:
+    """Update a user's ingredient scores from a drink rating."""
+    adjustment = _rating_adjustment(rating)
+    preferences = load_ingredient_preferences()
+    if adjustment == 0:
+        return preferences
+
+    recipes = load_recipes()
+    drink_recipe = recipes[recipes["drink_id"].astype(str).str.lower() == drink_id.lower()]
+    if drink_recipe.empty:
+        return preferences
+
+    for _, recipe_row in drink_recipe.iterrows():
+        ingredient_id = recipe_row["ingredient_id"]
+        quantity = float(recipe_row["quantity"])
+        score_delta = adjustment * quantity
+        mask = (
+            (preferences["user_id"].astype(str).str.lower() == user_id.lower())
+            & (preferences["ingredient_id"].astype(str) == ingredient_id)
+        )
+
+        if mask.any():
+            preferences.loc[mask, "preference_score"] = (
+                preferences.loc[mask, "preference_score"].astype(float) + score_delta
+            )
+        else:
+            preferences = pd.concat(
+                [
+                    preferences,
+                    pd.DataFrame(
+                        [
+                            {
+                                "user_id": user_id,
+                                "ingredient_id": ingredient_id,
+                                "preference_score": score_delta,
+                            }
+                        ]
+                    ),
+                ],
+                ignore_index=True,
+            )
+
+    preferences.to_csv(PREFERENCES_FILE, index=False)
+    return preferences
+
+
+def get_taste_profile(user_id: str) -> dict[str, pd.DataFrame]:
+    """Return favorite, least favorite, and most common ingredients for a user."""
+    preferences = load_ingredient_preferences()
+    recipes = load_recipes()
+    ingredients = load_ingredients()
+    ratings = pd.read_csv(RATINGS_FILE) if RATINGS_FILE.exists() else pd.DataFrame()
+    user_preferences = preferences[
+        preferences["user_id"].astype(str).str.lower() == user_id.lower()
+    ].copy()
+
+    if user_preferences.empty:
+        scored = pd.DataFrame(columns=["ingredient_id", "ingredient_name", "preference_score"])
+    else:
+        user_preferences["preference_score"] = user_preferences["preference_score"].astype(float)
+        scored = user_preferences.merge(ingredients, on="ingredient_id", how="left")
+
+    if ratings.empty:
+        common = pd.DataFrame(columns=["ingredient_id", "ingredient_name", "times_seen"])
+    else:
+        user_ratings = ratings[
+            ratings["user_id"].astype(str).str.lower() == user_id.lower()
+        ]
+        common = recipes[recipes["drink_id"].isin(user_ratings["drink_id"])]
+        common = (
+            common.groupby("ingredient_id")["quantity"]
+            .sum()
+            .reset_index(name="times_seen")
+            .merge(ingredients, on="ingredient_id", how="left")
+            .sort_values("times_seen", ascending=False)
+        )
+
+    return {
+        "favorite": scored[scored["preference_score"] > 0].sort_values(
+            "preference_score",
+            ascending=False,
+        ),
+        "least_favorite": scored[scored["preference_score"] < 0].sort_values(
+            "preference_score",
+            ascending=True,
+        ),
+        "most_common": common,
+    }
+
+
+def _next_custom_drink_id(drinks: pd.DataFrame) -> str:
+    """Create the next custom drink ID in the format CUS-0001."""
+    custom_ids = drinks[drinks["drink_id"].astype(str).str.startswith("CUS-")]["drink_id"]
+    if custom_ids.empty:
+        return "CUS-0001"
+
+    numbers = custom_ids.str.replace("CUS-", "", regex=False).astype(int)
+    return f"CUS-{numbers.max() + 1:04d}"
+
+
+def show_ingredients_by_category(ingredients: pd.DataFrame) -> None:
+    """Print ingredients grouped by category."""
+    print("\nIngredient options")
+    for category, rows in ingredients.groupby("category"):
+        print(f"\n{category.title()}")
+        for _, ingredient in rows.iterrows():
+            print(
+                f"  {ingredient['ingredient_id']}: {ingredient['ingredient_name']} "
+                f"({ingredient['calories']} cal, {ingredient['caffeine']} mg caffeine, "
+                f"${ingredient['price']:.2f})"
+            )
+
+
+def parse_recipe_input(recipe_text: str) -> list[dict[str, object]]:
+    """Parse recipe input like ING-001:1, ING-010:2."""
+    recipe_items = []
+    for item in recipe_text.split(","):
+        if not item.strip():
+            continue
+
+        parts = item.strip().split(":")
+        ingredient_id = parts[0].strip()
+        quantity = 1.0
+        if len(parts) > 1:
+            quantity = float(parts[1].strip())
+
+        recipe_items.append(
+            {
+                "ingredient_id": ingredient_id,
+                "quantity": quantity,
+            }
+        )
+    return recipe_items
+
+
+def calculate_nutrition(recipe_items: list[dict[str, object]], ingredients: pd.DataFrame) -> dict[str, float]:
+    """Calculate calories and caffeine from a recipe."""
+    recipe = pd.DataFrame(recipe_items)
+    merged = recipe.merge(ingredients, on="ingredient_id", how="left")
+    return {
+        "calories": float(round((merged["calories"] * merged["quantity"]).sum(), 1)),
+        "caffeine": float(round((merged["caffeine"] * merged["quantity"]).sum(), 1)),
+    }
+
+
+def calculate_cost(recipe_items: list[dict[str, object]], ingredients: pd.DataFrame) -> float:
+    """Calculate total ingredient cost from a recipe."""
+    recipe = pd.DataFrame(recipe_items)
+    merged = recipe.merge(ingredients, on="ingredient_id", how="left")
+    return round((merged["price"] * merged["quantity"]).sum(), 2)
+
+
+def calculate_flavor_score(recipe_items: list[dict[str, object]], ingredients: pd.DataFrame) -> int:
+    """Score recipe flavor balance with simple category rules."""
+    recipe = pd.DataFrame(recipe_items)
+    merged = recipe.merge(ingredients, on="ingredient_id", how="left")
+    categories = set(merged["category"].dropna().astype(str).str.lower())
+    score = sum(points for category, points in FLAVOR_WEIGHTS.items() if category in categories)
+
+    syrup_count = (merged["category"].str.lower() == "syrup").sum()
+    topping_count = (merged["category"].str.lower() == "topping").sum()
+    if syrup_count > 2:
+        score -= 2
+    if topping_count > 2:
+        score -= 1
+    if "base" in categories and ("milk" in categories or "water" in categories):
+        score += 2
+
+    return max(0, min(10, int(score)))
+
+
+def _caffeine_level(caffeine: float) -> str:
+    """Convert caffeine milligrams into a friendly caffeine level."""
+    if caffeine >= 180:
+        return "high"
+    if caffeine >= 50:
+        return "medium"
+    if caffeine > 0:
+        return "low"
+    return "none"
+
+
+def _clean_label(value: str, suffixes: tuple[str, ...]) -> str:
+    """Remove ingredient suffix words used for readable drink fields."""
+    cleaned = value
+    for suffix in suffixes:
+        if cleaned.lower().endswith(suffix):
+            cleaned = cleaned[: -len(suffix)]
+    return cleaned.strip()
+
+
+def _first_category_value(merged: pd.DataFrame, category: str, fallback: str) -> str:
+    """Return the first ingredient name in a category."""
+    matches = merged[merged["category"].str.lower() == category]
+    if matches.empty:
+        return fallback
+    return str(matches.iloc[0]["ingredient_name"])
+
+
+def build_custom_drink_from_ingredients(
+    drinks: pd.DataFrame,
+    drink_name: str,
+    recipe_items: list[dict[str, object]],
+) -> dict[str, object]:
+    """Build a custom drink from ingredient recipe rows."""
+    if not recipe_items:
+        raise ValueError("Recipe must include at least one ingredient.")
+
+    ingredients = load_ingredients()
+    recipe = pd.DataFrame(recipe_items)
+    merged = recipe.merge(ingredients, on="ingredient_id", how="left")
+    if merged["ingredient_name"].isna().any():
+        missing = merged[merged["ingredient_name"].isna()]["ingredient_id"].tolist()
+        raise ValueError(f"Unknown ingredient ID(s): {', '.join(missing)}")
+
+    nutrition = calculate_nutrition(recipe_items, ingredients)
+    price = calculate_cost(recipe_items, ingredients)
+    flavor_score = calculate_flavor_score(recipe_items, ingredients)
+
+    base = _first_category_value(merged, "base", "Custom Base")
+    milk = _clean_label(_first_category_value(merged, "milk", "none"), (" milk",))
+    syrup = _clean_label(
+        _first_category_value(merged, "syrup", "none"),
+        (" syrup", " sauce"),
+    )
+    temperature = _clean_label(
+        _first_category_value(merged, "temperature", "custom"),
+        (" preparation",),
+    ).lower()
+    size = _clean_label(_first_category_value(merged, "size", "custom"), (" cup",)).lower()
+    topping_names = merged[merged["category"].str.lower() == "topping"]["ingredient_name"].tolist()
+    toppings = ", ".join(topping_names) if topping_names else "none"
+    shots = recipe[recipe["ingredient_id"] == "ING-001"]["quantity"].sum()
+
+    dietary_tags = []
+    if milk.lower() in {"oat", "almond", "soy", "coconut", "none"}:
+        dietary_tags.extend(["dairy-free", "vegan"])
+    else:
+        dietary_tags.append("vegetarian")
+    if nutrition["calories"] <= 120:
+        dietary_tags.append("low-calorie")
+    if syrup == "none":
+        dietary_tags.append("no-added-sugar")
+
+    return {
+        "drink_id": _next_custom_drink_id(drinks),
+        "drink_name": drink_name or f"Custom {base}",
+        "base": base,
+        "temperature": temperature,
+        "size": size,
+        "milk": milk,
+        "syrup": syrup,
+        "sweetness_level": "unsweetened" if syrup == "none" else "classic",
+        "espresso_shots": int(shots),
+        "caffeine_level": _caffeine_level(nutrition["caffeine"]),
+        "calories": nutrition["calories"],
+        "price": float(price),
+        "dietary_tags": ",".join(dietary_tags),
+        "flavor_profile": ", ".join(merged["ingredient_name"].astype(str).tolist()),
+        "toppings": toppings,
+        "ice_level": _first_category_value(merged, "ice", "none"),
+        "flavor_score": flavor_score,
+    }
+
+
+def save_custom_drink_recipe(
+    custom_drink: dict[str, object],
+    recipe_items: list[dict[str, object]],
+) -> None:
+    """Save a custom drink and its ingredient recipe."""
+    if CUSTOM_DRINKS_FILE.exists():
+        custom_drinks = pd.read_csv(CUSTOM_DRINKS_FILE)
+    else:
+        custom_drinks = pd.DataFrame(columns=list(custom_drink.keys()))
+
+    updated_drinks = pd.concat([custom_drinks, pd.DataFrame([custom_drink])], ignore_index=True)
+    updated_drinks.to_csv(CUSTOM_DRINKS_FILE, index=False)
+
+    recipes = load_recipes()
+    recipe_rows = [
+        {
+            "drink_id": custom_drink["drink_id"],
+            "ingredient_id": item["ingredient_id"],
+            "quantity": item["quantity"],
+        }
+        for item in recipe_items
+    ]
+    updated_recipes = pd.concat([recipes, pd.DataFrame(recipe_rows)], ignore_index=True)
+    updated_recipes.to_csv(RECIPES_FILE, index=False)
