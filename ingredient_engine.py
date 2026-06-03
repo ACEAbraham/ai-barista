@@ -5,15 +5,35 @@ import re
 
 import pandas as pd
 
+from supabase_client import insert_row, table_to_dataframe
+
 
 INGREDIENTS_FILE = Path(__file__).with_name("ingredients.csv")
 RECIPES_FILE = Path(__file__).with_name("drink_recipes.csv")
-CUSTOM_DRINKS_FILE = Path(__file__).with_name("custom_drinks.csv")
 PREFERENCES_FILE = Path(__file__).with_name("ingredient_preferences.csv")
-RATINGS_FILE = Path(__file__).with_name("ratings.csv")
 
 RECIPE_COLUMNS = ["drink_id", "ingredient_id", "quantity", "unit"]
 PREFERENCE_COLUMNS = ["user_id", "ingredient_id", "preference_score"]
+CUSTOM_DRINK_COLUMNS = [
+    "drink_id",
+    "drink_name",
+    "base",
+    "temperature",
+    "size",
+    "milk",
+    "syrup",
+    "sweetness_level",
+    "espresso_shots",
+    "caffeine_level",
+    "calories",
+    "price",
+    "dietary_tags",
+    "flavor_profile",
+    "toppings",
+    "ice_level",
+    "flavor_score",
+]
+RATING_COLUMNS = ["user_id", "drink_id", "rating", "would_order_again"]
 INGREDIENT_COLUMNS = [
     "ingredient_id",
     "ingredient_name",
@@ -63,6 +83,11 @@ def load_recipes() -> pd.DataFrame:
             recipes["unit"] = "serving"
         return recipes
     return pd.DataFrame(columns=RECIPE_COLUMNS)
+
+
+def load_custom_drinks() -> pd.DataFrame:
+    """Load custom drinks from Supabase."""
+    return table_to_dataframe("custom_drinks", CUSTOM_DRINK_COLUMNS)
 
 
 def normalize_name(name: str) -> str:
@@ -130,11 +155,7 @@ def add_ingredient(
 
 def custom_drink_exists(drink_name: str, recipe_items: list[dict[str, object]]) -> tuple[bool, str]:
     """Check whether a custom drink duplicates a name or recipe signature."""
-    custom_drinks = (
-        pd.read_csv(CUSTOM_DRINKS_FILE)
-        if CUSTOM_DRINKS_FILE.exists()
-        else pd.DataFrame()
-    )
+    custom_drinks = load_custom_drinks()
     normalized_new_name = normalize_name(drink_name)
     if not custom_drinks.empty and "drink_name" in custom_drinks.columns:
         normalized_names = custom_drinks["drink_name"].astype(str).apply(normalize_name)
@@ -226,7 +247,7 @@ def get_taste_profile(user_id: str) -> dict[str, pd.DataFrame]:
     preferences = load_ingredient_preferences()
     recipes = load_recipes()
     ingredients = load_ingredients()
-    ratings = pd.read_csv(RATINGS_FILE) if RATINGS_FILE.exists() else pd.DataFrame()
+    ratings = table_to_dataframe("ratings", RATING_COLUMNS)
     user_preferences = preferences[
         preferences["user_id"].astype(str).str.lower() == user_id.lower()
     ].copy()
@@ -449,14 +470,8 @@ def save_custom_drink_recipe(
     custom_drink: dict[str, object],
     recipe_items: list[dict[str, object]],
 ) -> None:
-    """Save a custom drink and its ingredient recipe."""
-    if CUSTOM_DRINKS_FILE.exists():
-        custom_drinks = pd.read_csv(CUSTOM_DRINKS_FILE)
-    else:
-        custom_drinks = pd.DataFrame(columns=list(custom_drink.keys()))
-
-    updated_drinks = pd.concat([custom_drinks, pd.DataFrame([custom_drink])], ignore_index=True)
-    updated_drinks.to_csv(CUSTOM_DRINKS_FILE, index=False)
+    """Save a custom drink to Supabase and its ingredient recipe locally."""
+    insert_row("custom_drinks", custom_drink)
 
     recipes = load_recipes()
     recipe_rows = [

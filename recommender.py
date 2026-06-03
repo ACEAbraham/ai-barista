@@ -12,6 +12,21 @@ PROFILE_SCORE_WEIGHTS = {
 RATING_MULTIPLIER = 2
 ORDER_AGAIN_BONUS = 3
 INGREDIENT_PREFERENCE_MULTIPLIER = 1
+CLOSE_MATCH_WEIGHTS = {
+    "milk": 3,
+    "temperature": 3,
+    "caffeine": 2,
+    "sweetness": 2,
+    "dietary_tag": 2,
+    "budget": 1,
+}
+
+
+def _clean_value(value: object) -> str:
+    """Return a safe lowercase string for comparisons."""
+    if pd.isna(value):
+        return ""
+    return str(value).strip().lower()
 
 
 def _is_true(value: object) -> bool:
@@ -37,21 +52,21 @@ def filter_by_caffeine(drinks: pd.DataFrame, caffeine_level: str | None) -> pd.D
     """Filter drinks by caffeine level."""
     if not caffeine_level:
         return drinks
-    return drinks[drinks["caffeine_level"].str.lower() == caffeine_level.lower()]
+    return drinks[drinks["caffeine_level"].apply(_clean_value) == caffeine_level.lower()]
 
 
 def filter_by_temperature(drinks: pd.DataFrame, temperature: str | None) -> pd.DataFrame:
     """Filter drinks by hot, iced, or blended temperature."""
     if not temperature:
         return drinks
-    return drinks[drinks["temperature"].str.lower() == temperature.lower()]
+    return drinks[drinks["temperature"].apply(_clean_value) == temperature.lower()]
 
 
 def filter_by_milk(drinks: pd.DataFrame, milk: str | None) -> pd.DataFrame:
     """Filter drinks by milk type."""
     if not milk:
         return drinks
-    return drinks[drinks["milk"].str.lower() == milk.lower()]
+    return drinks[drinks["milk"].apply(_clean_value) == milk.lower()]
 
 
 def filter_by_budget(drinks: pd.DataFrame, max_price: float | None) -> pd.DataFrame:
@@ -65,7 +80,7 @@ def filter_by_sweetness(drinks: pd.DataFrame, sweetness_level: str | None) -> pd
     """Filter drinks by sweetness level."""
     if not sweetness_level:
         return drinks
-    return drinks[drinks["sweetness_level"].str.lower() == sweetness_level.lower()]
+    return drinks[drinks["sweetness_level"].apply(_clean_value) == sweetness_level.lower()]
 
 
 def filter_by_dietary_tag(drinks: pd.DataFrame, dietary_tag: str | None) -> pd.DataFrame:
@@ -73,7 +88,7 @@ def filter_by_dietary_tag(drinks: pd.DataFrame, dietary_tag: str | None) -> pd.D
     if not dietary_tag:
         return drinks
     tag = dietary_tag.lower()
-    return drinks[drinks["dietary_tags"].str.lower().str.contains(tag, na=False)]
+    return drinks[drinks["dietary_tags"].apply(_clean_value).str.contains(tag, na=False)]
 
 
 def add_recommendation_scores(
@@ -96,25 +111,25 @@ def add_recommendation_scores(
 
         _add_reason(
             scored_drinks,
-            scored_drinks["milk"].str.lower() == favorite_milk,
+            scored_drinks["milk"].apply(_clean_value) == favorite_milk,
             PROFILE_SCORE_WEIGHTS["milk"],
             f"+{PROFILE_SCORE_WEIGHTS['milk']} favorite milk",
         )
         _add_reason(
             scored_drinks,
-            scored_drinks["temperature"].str.lower() == favorite_temperature,
+            scored_drinks["temperature"].apply(_clean_value) == favorite_temperature,
             PROFILE_SCORE_WEIGHTS["temperature"],
             f"+{PROFILE_SCORE_WEIGHTS['temperature']} favorite temperature",
         )
         _add_reason(
             scored_drinks,
-            scored_drinks["caffeine_level"].str.lower() == caffeine_tolerance,
+            scored_drinks["caffeine_level"].apply(_clean_value) == caffeine_tolerance,
             PROFILE_SCORE_WEIGHTS["caffeine"],
             f"+{PROFILE_SCORE_WEIGHTS['caffeine']} caffeine tolerance",
         )
         _add_reason(
             scored_drinks,
-            scored_drinks["sweetness_level"].str.lower() == preferred_sweetness,
+            scored_drinks["sweetness_level"].apply(_clean_value) == preferred_sweetness,
             PROFILE_SCORE_WEIGHTS["sweetness"],
             f"+{PROFILE_SCORE_WEIGHTS['sweetness']} preferred sweetness",
         )
@@ -228,3 +243,189 @@ def recommend_drinks(
         ingredient_preferences=ingredient_preferences,
         drink_recipes=drink_recipes,
     )
+
+
+def _selected_filters(
+    caffeine_level: str | None,
+    temperature: str | None,
+    milk: str | None,
+    max_price: float | None,
+    sweetness_level: str | None,
+    dietary_tag: str | None,
+) -> dict[str, object]:
+    """Collect active filters for fallback scoring."""
+    return {
+        "milk": milk,
+        "temperature": temperature,
+        "caffeine": caffeine_level,
+        "sweetness": sweetness_level,
+        "dietary_tag": dietary_tag,
+        "budget": max_price,
+    }
+
+
+def _relaxed_filters(matches: pd.DataFrame, filters: dict[str, object]) -> list[str]:
+    """Return filters that were not matched by every fallback result."""
+    relaxed = []
+    if matches.empty:
+        return relaxed
+
+    if filters["milk"] and not (matches["milk"].apply(_clean_value) == filters["milk"].lower()).all():
+        relaxed.append("milk")
+    if filters["temperature"] and not (
+        matches["temperature"].apply(_clean_value) == filters["temperature"].lower()
+    ).all():
+        relaxed.append("temperature")
+    if filters["caffeine"] and not (
+        matches["caffeine_level"].apply(_clean_value) == filters["caffeine"].lower()
+    ).all():
+        relaxed.append("caffeine")
+    if filters["sweetness"] and not (
+        matches["sweetness_level"].apply(_clean_value) == filters["sweetness"].lower()
+    ).all():
+        relaxed.append("sweetness")
+    if filters["dietary_tag"] and not (
+        matches["dietary_tags"].apply(_clean_value).str.contains(filters["dietary_tag"].lower(), na=False)
+    ).all():
+        relaxed.append("dietary tag")
+    if filters["budget"] is not None and not (matches["price"] <= filters["budget"]).all():
+        relaxed.append("budget")
+    return relaxed
+
+
+def _close_match_explanation(row: pd.Series, filters: dict[str, object]) -> str:
+    """Explain which selected filters matched and which changed."""
+    matched = []
+    different = []
+
+    checks = [
+        ("milk", "milk", filters["milk"]),
+        ("temperature", "temperature", filters["temperature"]),
+        ("caffeine", "caffeine_level", filters["caffeine"]),
+        ("sweetness", "sweetness_level", filters["sweetness"]),
+    ]
+    for label, column, selected in checks:
+        if not selected:
+            continue
+        if _clean_value(row.get(column, "")) == selected.lower():
+            matched.append(label)
+        else:
+            different.append(label)
+
+    dietary_tag = filters["dietary_tag"]
+    if dietary_tag:
+        if dietary_tag.lower() in _clean_value(row.get("dietary_tags", "")):
+            matched.append("dietary tag")
+        else:
+            different.append("dietary tag")
+
+    budget = filters["budget"]
+    if budget is not None:
+        if row.get("price", float("inf")) <= budget:
+            matched.append("budget")
+        else:
+            different.append("budget")
+
+    def joined(values: list[str]) -> str:
+        if len(values) <= 1:
+            return "".join(values)
+        return f"{', '.join(values[:-1])} and {values[-1]}"
+
+    if matched and different:
+        verb = "was" if len(different) == 1 else "were"
+        return (
+            f"Close match: matched {joined(matched)}, "
+            f"but {joined(different)} {verb} different."
+        )
+    if matched:
+        return f"Close match: matched {joined(matched)}."
+    return "Close match: ranked by your profile and closest available drink attributes."
+
+
+def recommend_with_fallback(
+    drinks: pd.DataFrame,
+    caffeine_level: str | None = None,
+    temperature: str | None = None,
+    milk: str | None = None,
+    max_price: float | None = None,
+    sweetness_level: str | None = None,
+    dietary_tag: str | None = None,
+    user: dict[str, str] | None = None,
+    user_history: pd.DataFrame | None = None,
+    ingredient_preferences: pd.DataFrame | None = None,
+    drink_recipes: pd.DataFrame | None = None,
+) -> tuple[pd.DataFrame, bool, list[str]]:
+    """Recommend exact matches first, then closest matches if exact matches are empty."""
+    exact_matches = recommend_drinks(
+        drinks=drinks,
+        caffeine_level=caffeine_level,
+        temperature=temperature,
+        milk=milk,
+        max_price=max_price,
+        sweetness_level=sweetness_level,
+        dietary_tag=dietary_tag,
+        user=user,
+        user_history=user_history,
+        ingredient_preferences=ingredient_preferences,
+        drink_recipes=drink_recipes,
+    )
+    if not exact_matches.empty:
+        return exact_matches, True, []
+
+    filters = _selected_filters(
+        caffeine_level=caffeine_level,
+        temperature=temperature,
+        milk=milk,
+        max_price=max_price,
+        sweetness_level=sweetness_level,
+        dietary_tag=dietary_tag,
+    )
+    fallback = add_recommendation_scores(
+        drinks,
+        user=user,
+        user_history=user_history,
+        ingredient_preferences=ingredient_preferences,
+        drink_recipes=drink_recipes,
+    )
+    fallback["close_match_score"] = 0
+
+    if milk:
+        fallback.loc[fallback["milk"].apply(_clean_value) == milk.lower(), "close_match_score"] += (
+            CLOSE_MATCH_WEIGHTS["milk"]
+        )
+    if temperature:
+        fallback.loc[
+            fallback["temperature"].apply(_clean_value) == temperature.lower(),
+            "close_match_score",
+        ] += CLOSE_MATCH_WEIGHTS["temperature"]
+    if caffeine_level:
+        fallback.loc[
+            fallback["caffeine_level"].apply(_clean_value) == caffeine_level.lower(),
+            "close_match_score",
+        ] += CLOSE_MATCH_WEIGHTS["caffeine"]
+    if sweetness_level:
+        fallback.loc[
+            fallback["sweetness_level"].apply(_clean_value) == sweetness_level.lower(),
+            "close_match_score",
+        ] += CLOSE_MATCH_WEIGHTS["sweetness"]
+    if dietary_tag:
+        fallback.loc[
+            fallback["dietary_tags"].apply(_clean_value).str.contains(dietary_tag.lower(), na=False),
+            "close_match_score",
+        ] += CLOSE_MATCH_WEIGHTS["dietary_tag"]
+    if max_price is not None:
+        fallback.loc[fallback["price"] <= max_price, "close_match_score"] += CLOSE_MATCH_WEIGHTS[
+            "budget"
+        ]
+
+    fallback["recommendation_score"] += fallback["close_match_score"]
+    fallback["recommendation_explanation"] = fallback.apply(
+        lambda row: _close_match_explanation(row, filters),
+        axis=1,
+    )
+    fallback = fallback.sort_values(
+        by=["recommendation_score", "close_match_score", "price"],
+        ascending=[False, False, True],
+    )
+    relaxed = _relaxed_filters(fallback.head(20), filters)
+    return fallback, False, relaxed

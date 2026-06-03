@@ -5,10 +5,9 @@ from pathlib import Path
 
 import pandas as pd
 
+from supabase_client import insert_row
 
-CUSTOM_DRINKS_FILE = Path(__file__).with_name("custom_drinks.csv")
 COMPONENTS_FILE = Path(__file__).with_name("drink_components.csv")
-SESSIONS_FILE = Path(__file__).with_name("sessions.csv")
 
 SESSION_COLUMNS = [
     "user_id",
@@ -115,17 +114,8 @@ def build_custom_drink(
 
 
 def save_custom_drink(custom_drink: dict[str, object]) -> None:
-    """Append a custom drink to custom_drinks.csv."""
-    if CUSTOM_DRINKS_FILE.exists():
-        custom_drinks = pd.read_csv(CUSTOM_DRINKS_FILE)
-    else:
-        custom_drinks = pd.DataFrame(columns=list(custom_drink.keys()))
-
-    updated_drinks = pd.concat(
-        [custom_drinks, pd.DataFrame([custom_drink])],
-        ignore_index=True,
-    )
-    updated_drinks.to_csv(CUSTOM_DRINKS_FILE, index=False)
+    """Save a custom drink to Supabase."""
+    insert_row("custom_drinks", custom_drink)
 
 
 def log_session(
@@ -137,12 +127,7 @@ def log_session(
     drink_id: str = "",
     rating: int | str = "",
 ) -> dict[str, object]:
-    """Save a user interaction as future training data."""
-    if SESSIONS_FILE.exists():
-        sessions = pd.read_csv(SESSIONS_FILE)
-    else:
-        sessions = pd.DataFrame(columns=SESSION_COLUMNS)
-
+    """Save a user interaction to Supabase as future training data."""
     session = {
         "user_id": user_id,
         "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -153,6 +138,4 @@ def log_session(
         "drink_id": drink_id,
         "rating": rating,
     }
-    updated_sessions = pd.concat([sessions, pd.DataFrame([session])], ignore_index=True)
-    updated_sessions.to_csv(SESSIONS_FILE, index=False)
-    return session
+    return insert_row("sessions", session)

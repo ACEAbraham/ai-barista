@@ -1,5 +1,7 @@
 """Streamlit web app for AI Barista data collection."""
 
+from html import escape
+
 import pandas as pd
 import streamlit as st
 
@@ -19,21 +21,186 @@ from ingredient_engine import (
     update_ingredient_preferences,
 )
 from profile import create_user, get_user_history, load_user, save_rating
-from recommender import recommend_drinks
+from profile import load_users as load_supabase_users
+from recommender import recommend_with_fallback
+from supabase_client import supabase_is_configured
 
 
-USERS_FILE = "users.csv"
+def apply_theme() -> None:
+    """Apply the AI Barista premium Streamlit theme."""
+    st.markdown(
+        """
+        <style>
+        :root {
+            --ai-bg: #FAF7F2;
+            --ai-brown: #6F4E37;
+            --ai-espresso: #3B2A1A;
+            --ai-card: #FFFDF8;
+            --ai-tan: #D7B899;
+        }
 
+        .stApp {
+            background: var(--ai-bg);
+            color: var(--ai-espresso);
+        }
 
-def load_users() -> pd.DataFrame:
-    """Load all user profiles."""
-    return pd.read_csv(USERS_FILE)
+        [data-testid="stHeader"] {
+            background: rgba(250, 247, 242, 0.88);
+        }
+
+        [data-testid="stSidebar"] {
+            background: #FFF9EF;
+            border-right: 1px solid rgba(215, 184, 153, 0.45);
+        }
+
+        .block-container {
+            padding-top: 2.1rem;
+            padding-bottom: 3rem;
+            max-width: 1220px;
+        }
+
+        .ai-title-section {
+            background: linear-gradient(135deg, #FFFDF8 0%, #F7EBDC 100%);
+            border: 1px solid rgba(215, 184, 153, 0.5);
+            border-radius: 22px;
+            padding: 2rem 2.25rem;
+            margin-bottom: 1.4rem;
+            box-shadow: 0 14px 36px rgba(59, 42, 26, 0.07);
+        }
+
+        .ai-title-section h1 {
+            color: var(--ai-brown);
+            font-size: 3rem;
+            line-height: 1;
+            margin: 0 0 0.6rem 0;
+            letter-spacing: 0;
+        }
+
+        .ai-title-section p {
+            color: var(--ai-espresso);
+            font-size: 1.06rem;
+            margin: 0;
+            opacity: 0.82;
+        }
+
+        h2, h3 {
+            color: var(--ai-espresso) !important;
+            letter-spacing: 0;
+        }
+
+        div[data-testid="stForm"],
+        div[data-testid="stExpander"] {
+            background: var(--ai-card);
+            border: 1px solid rgba(215, 184, 153, 0.45);
+            border-radius: 18px;
+            padding: 1rem;
+            box-shadow: 0 10px 28px rgba(59, 42, 26, 0.05);
+        }
+
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 0.35rem;
+        }
+
+        .stTabs [data-baseweb="tab"] {
+            border-radius: 999px;
+            padding: 0.55rem 0.95rem;
+            color: var(--ai-espresso);
+        }
+
+        .stTabs [aria-selected="true"] {
+            background: #EFE0CC;
+            color: var(--ai-brown);
+        }
+
+        .stButton > button,
+        .stFormSubmitButton > button {
+            background: var(--ai-brown);
+            color: #FFFDF8;
+            border: 1px solid var(--ai-brown);
+            border-radius: 999px;
+            padding: 0.55rem 1.1rem;
+            font-weight: 700;
+            box-shadow: 0 8px 18px rgba(111, 78, 55, 0.18);
+        }
+
+        .stButton > button:hover,
+        .stFormSubmitButton > button:hover {
+            background: #5F412D;
+            color: #FFFDF8;
+            border-color: #5F412D;
+        }
+
+        [data-baseweb="input"],
+        [data-baseweb="select"] > div,
+        [data-baseweb="textarea"] {
+            background: #FFFDF8;
+            border-color: rgba(111, 78, 55, 0.28);
+            border-radius: 12px;
+        }
+
+        label, .stCaption, [data-testid="stMarkdownContainer"] {
+            color: var(--ai-espresso);
+        }
+
+        .stAlert {
+            border-radius: 16px;
+            border: 1px solid rgba(215, 184, 153, 0.55);
+            background: #FFF8EA;
+            color: var(--ai-espresso);
+        }
+
+        .ai-card {
+            background: var(--ai-card);
+            border: 1px solid rgba(215, 184, 153, 0.55);
+            border-radius: 20px;
+            padding: 1.15rem 1.25rem;
+            margin: 0.85rem 0;
+            box-shadow: 0 12px 30px rgba(59, 42, 26, 0.06);
+        }
+
+        .ai-card-title {
+            color: var(--ai-espresso);
+            font-size: 1.12rem;
+            font-weight: 800;
+            margin-bottom: 0.45rem;
+        }
+
+        .ai-card-meta {
+            color: rgba(59, 42, 26, 0.72);
+            font-size: 0.92rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .ai-score {
+            display: inline-block;
+            background: rgba(111, 78, 55, 0.12);
+            color: var(--ai-brown);
+            border: 1px solid rgba(111, 78, 55, 0.22);
+            border-radius: 999px;
+            padding: 0.22rem 0.65rem;
+            font-weight: 800;
+            font-size: 0.9rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .ai-explanation {
+            background: rgba(215, 184, 153, 0.26);
+            border-left: 4px solid var(--ai-tan);
+            color: var(--ai-espresso);
+            border-radius: 14px;
+            padding: 0.75rem 0.85rem;
+            font-size: 0.92rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def refresh_data() -> None:
     """Reload CSV-backed app data after a save."""
     st.session_state.drinks = load_drinks()
-    st.session_state.users = load_users()
+    st.session_state.users = load_supabase_users()
     st.session_state.ingredients = load_ingredients()
 
 
@@ -42,11 +209,20 @@ def initialize_state() -> None:
     if "drinks" not in st.session_state:
         st.session_state.drinks = load_drinks()
     if "users" not in st.session_state:
-        st.session_state.users = load_users()
+        st.session_state.users = load_supabase_users()
     if "current_user" not in st.session_state:
         st.session_state.current_user = None
     if "ingredients" not in st.session_state:
         st.session_state.ingredients = load_ingredients()
+
+
+def save_warning() -> None:
+    """Show a friendly warning when Supabase is not configured locally."""
+    st.warning(
+        "Supabase is not configured in this environment. Add SUPABASE_URL "
+        "and SUPABASE_KEY to Streamlit secrets or local environment variables "
+        "to save shared data."
+    )
 
 
 def current_user_label() -> str:
@@ -94,6 +270,42 @@ def session_context(prefix: str) -> dict[str, object]:
     }
 
 
+def safe_text(value: object, fallback: str = "") -> str:
+    """Return escaped display text for HTML snippets."""
+    if pd.isna(value):
+        return fallback
+    return escape(str(value))
+
+
+def render_recommendation_cards(matches: pd.DataFrame, limit: int = 10) -> None:
+    """Render recommendation results as premium cards."""
+    for _, drink in matches.head(limit).iterrows():
+        name = safe_text(drink.get("drink_name", "Unnamed drink"))
+        drink_id = safe_text(drink.get("drink_id", ""))
+        price = drink.get("price", 0)
+        calories = drink.get("calories", 0)
+        caffeine = safe_text(drink.get("caffeine_level", "unknown"))
+        score = safe_text(drink.get("recommendation_score", 0))
+        explanation = safe_text(
+            drink.get("recommendation_explanation", "No explanation available.")
+        )
+
+        st.markdown(
+            f"""
+            <div class="ai-card">
+                <div class="ai-card-title">{name}</div>
+                <div class="ai-card-meta">
+                    {drink_id} &nbsp;|&nbsp; ${float(price):.2f} &nbsp;|&nbsp;
+                    {caffeine} caffeine &nbsp;|&nbsp; {calories} calories
+                </div>
+                <div class="ai-score">Recommendation score: {score}</div>
+                <div class="ai-explanation">{explanation}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
 def create_profile_section() -> None:
     """Render profile creation UI."""
     st.subheader("Create Profile")
@@ -120,13 +332,17 @@ def create_profile_section() -> None:
         if not name.strip():
             st.error("Please enter a name.")
             return
-        user = create_user(
-            name=name.strip(),
-            favorite_milk=favorite_milk,
-            favorite_temperature=favorite_temperature,
-            caffeine_tolerance=caffeine_tolerance,
-            preferred_sweetness=preferred_sweetness,
-        )
+        try:
+            user = create_user(
+                name=name.strip(),
+                favorite_milk=favorite_milk,
+                favorite_temperature=favorite_temperature,
+                caffeine_tolerance=caffeine_tolerance,
+                preferred_sweetness=preferred_sweetness,
+            )
+        except RuntimeError as error:
+            st.error(str(error))
+            return
         st.session_state.current_user = user
         refresh_data()
         st.success(f"Created and loaded profile: {user['name']} ({user['user_id']})")
@@ -191,7 +407,7 @@ def recommendation_section() -> None:
         submitted = st.form_submit_button("Find drinks")
 
     if submitted:
-        matches = recommend_drinks(
+        matches, exact_match, relaxed_filters = recommend_with_fallback(
             drinks=drinks,
             caffeine_level=None if caffeine == "Any" else caffeine,
             temperature=None if temperature == "Any" else temperature,
@@ -205,36 +421,34 @@ def recommendation_section() -> None:
             drink_recipes=load_recipes(),
         )
         st.session_state.last_matches = matches
+        st.session_state.last_exact_match = exact_match
+        st.session_state.last_relaxed_filters = relaxed_filters
 
         if not matches.empty:
             top_match = matches.iloc[0]
-            log_session(
-                user_id=user["user_id"] if user else "guest",
-                drink_id=top_match["drink_id"],
-                rating="",
-                **context,
-            )
-            st.success("Saved this recommendation interaction as training data.")
+            if supabase_is_configured():
+                log_session(
+                    user_id=user["user_id"] if user else "guest",
+                    drink_id=top_match["drink_id"],
+                    rating="",
+                    **context,
+                )
+                st.success("Saved this recommendation interaction as training data.")
+            else:
+                save_warning()
 
     matches = st.session_state.get("last_matches")
     if matches is not None:
         if matches.empty:
             st.warning("No drinks matched those filters.")
         else:
-            st.dataframe(
-                matches[
-                    [
-                        "drink_id",
-                        "drink_name",
-                        "recommendation_score",
-                        "recommendation_explanation",
-                        "price",
-                        "calories",
-                        "caffeine_level",
-                    ]
-                ].head(20),
-                width="stretch",
-            )
+            exact_match = st.session_state.get("last_exact_match", True)
+            relaxed_filters = st.session_state.get("last_relaxed_filters", [])
+            if not exact_match:
+                st.info("No exact match found, but try this instead:")
+                if relaxed_filters:
+                    st.caption(f"Relaxed filters: {', '.join(relaxed_filters)}")
+            render_recommendation_cards(matches)
 
 
 def ingredient_recipe_builder(ingredients: pd.DataFrame) -> list[dict[str, object]]:
@@ -331,19 +545,31 @@ def custom_drink_section() -> None:
             st.warning(duplicate_reason)
             return
 
-        save_custom_drink_recipe(custom_drink, recipe_items)
+        try:
+            save_custom_drink_recipe(custom_drink, recipe_items)
+        except RuntimeError as error:
+            st.error(str(error))
+            return
         saved_rating = ""
         if user and rate_now:
-            save_rating(user["user_id"], custom_drink["drink_id"], rating, would_order_again)
-            update_ingredient_preferences(user["user_id"], custom_drink["drink_id"], rating)
+            try:
+                save_rating(user["user_id"], custom_drink["drink_id"], rating, would_order_again)
+                update_ingredient_preferences(user["user_id"], custom_drink["drink_id"], rating)
+            except RuntimeError as error:
+                st.error(str(error))
+                return
             saved_rating = rating
 
-        log_session(
-            user_id=user["user_id"] if user else "guest",
-            drink_id=custom_drink["drink_id"],
-            rating=saved_rating,
-            **context,
-        )
+        try:
+            log_session(
+                user_id=user["user_id"] if user else "guest",
+                drink_id=custom_drink["drink_id"],
+                rating=saved_rating,
+                **context,
+            )
+        except RuntimeError as error:
+            st.error(str(error))
+            return
         refresh_data()
         st.success(f"Saved custom drink: {custom_drink['drink_name']}")
         st.metric("Calories", custom_drink["calories"])
@@ -416,14 +642,18 @@ def rate_drink_section() -> None:
         submitted = st.form_submit_button("Save rating")
 
     if submitted:
-        save_rating(user["user_id"], drink_id, rating, would_order_again)
-        update_ingredient_preferences(user["user_id"], drink_id, rating)
-        log_session(
-            user_id=user["user_id"],
-            drink_id=drink_id,
-            rating=rating,
-            **context,
-        )
+        try:
+            save_rating(user["user_id"], drink_id, rating, would_order_again)
+            update_ingredient_preferences(user["user_id"], drink_id, rating)
+            log_session(
+                user_id=user["user_id"],
+                drink_id=drink_id,
+                rating=rating,
+                **context,
+            )
+        except RuntimeError as error:
+            st.error(str(error))
+            return
         st.success("Saved rating, session data, and ingredient preferences.")
 
 
@@ -480,10 +710,23 @@ def taste_profile_section() -> None:
 def main() -> None:
     """Run the Streamlit app."""
     st.set_page_config(page_title="AI Barista", layout="wide")
+    apply_theme()
     initialize_state()
 
-    st.title("AI Barista")
-    st.caption("A shareable, no-ML beverage data collection app.")
+    st.markdown(
+        """
+        <section class="ai-title-section">
+            <h1>AI Barista</h1>
+            <p>Personalized beverage recommendations powered by your taste, context, and feedback.</p>
+        </section>
+        """,
+        unsafe_allow_html=True,
+    )
+    if not supabase_is_configured():
+        st.warning(
+            "Supabase credentials are not configured locally. Static catalog browsing works, "
+            "but profiles, ratings, sessions, and custom drinks require SUPABASE_URL and SUPABASE_KEY."
+        )
     st.sidebar.write(f"Current profile: **{current_user_label()}**")
 
     sections = st.tabs(

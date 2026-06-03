@@ -1,12 +1,8 @@
 """User profile and rating storage for AI Barista."""
 
-from pathlib import Path
-
 import pandas as pd
 
-
-USERS_FILE = Path(__file__).with_name("users.csv")
-RATINGS_FILE = Path(__file__).with_name("ratings.csv")
+from supabase_client import insert_row, table_to_dataframe
 
 USER_COLUMNS = [
     "user_id",
@@ -19,11 +15,14 @@ USER_COLUMNS = [
 RATING_COLUMNS = ["user_id", "drink_id", "rating", "would_order_again"]
 
 
-def _load_csv(csv_path: Path, columns: list[str]) -> pd.DataFrame:
-    """Load a CSV file, or return an empty DataFrame if it is missing."""
-    if csv_path.exists():
-        return pd.read_csv(csv_path)
-    return pd.DataFrame(columns=columns)
+def load_users() -> pd.DataFrame:
+    """Load all user profiles from Supabase."""
+    return table_to_dataframe("users", USER_COLUMNS)
+
+
+def load_ratings() -> pd.DataFrame:
+    """Load all ratings from Supabase."""
+    return table_to_dataframe("ratings", RATING_COLUMNS)
 
 
 def _next_user_id(users: pd.DataFrame) -> str:
@@ -42,8 +41,8 @@ def create_user(
     caffeine_tolerance: str,
     preferred_sweetness: str,
 ) -> dict[str, str]:
-    """Create a user profile and save it to users.csv."""
-    users = _load_csv(USERS_FILE, USER_COLUMNS)
+    """Create a user profile and save it to Supabase."""
+    users = load_users()
     user = {
         "user_id": _next_user_id(users),
         "name": name,
@@ -53,14 +52,12 @@ def create_user(
         "preferred_sweetness": preferred_sweetness,
     }
 
-    updated_users = pd.concat([users, pd.DataFrame([user])], ignore_index=True)
-    updated_users.to_csv(USERS_FILE, index=False)
-    return user
+    return insert_row("users", user)
 
 
 def load_user(user_id: str) -> dict[str, str] | None:
     """Load a single user profile by ID."""
-    users = _load_csv(USERS_FILE, USER_COLUMNS)
+    users = load_users()
     matches = users[users["user_id"].str.lower() == user_id.lower()]
     if matches.empty:
         return None
@@ -73,8 +70,7 @@ def save_rating(
     rating: int,
     would_order_again: bool,
 ) -> dict[str, object]:
-    """Save a drink rating to ratings.csv."""
-    ratings = _load_csv(RATINGS_FILE, RATING_COLUMNS)
+    """Save a drink rating to Supabase."""
     new_rating = {
         "user_id": user_id,
         "drink_id": drink_id,
@@ -82,12 +78,12 @@ def save_rating(
         "would_order_again": would_order_again,
     }
 
-    updated_ratings = pd.concat([ratings, pd.DataFrame([new_rating])], ignore_index=True)
-    updated_ratings.to_csv(RATINGS_FILE, index=False)
-    return new_rating
+    return insert_row("ratings", new_rating)
 
 
 def get_user_history(user_id: str) -> pd.DataFrame:
     """Return all saved ratings for one user."""
-    ratings = _load_csv(RATINGS_FILE, RATING_COLUMNS)
+    ratings = load_ratings()
+    if ratings.empty:
+        return ratings
     return ratings[ratings["user_id"].str.lower() == user_id.lower()]

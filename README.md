@@ -13,6 +13,7 @@ AI Barista is the first foundation for a "Spotify for beverages" app. This versi
 - `users.csv` stores user beverage preferences.
 - `ratings.csv` stores drink ratings and repeat-order feedback.
 - `sessions.csv` stores interaction context for future training data.
+- Supabase stores shared dynamic app data in `users`, `ratings`, `sessions`, and `custom_drinks`.
 - `drink_database.py` loads the CSV with pandas and lists available options.
 - `customization.py` builds custom drinks and logs session data.
 - `ingredient_engine.py` calculates nutrition, cost, and flavor scores from recipes.
@@ -22,6 +23,7 @@ AI Barista is the first foundation for a "Spotify for beverages" app. This versi
 - `main.py` provides a simple command-line interface.
 - `app.py` provides the Streamlit web app.
 - `requirements.txt` lists deployable app dependencies.
+- `supabase_client.py` reads Supabase credentials and creates the Supabase client.
 
 ## CSV Fields
 
@@ -111,6 +113,50 @@ Install dependencies if they are not already installed:
 pip install -r requirements.txt
 ```
 
+## Supabase Setup
+
+AI Barista uses Supabase for shared data collection. These tables should exist:
+
+- `users`
+- `ratings`
+- `sessions`
+- `custom_drinks`
+
+In Streamlit Cloud, add these secrets:
+
+```toml
+SUPABASE_URL = "your-supabase-project-url"
+SUPABASE_KEY = "your-supabase-anon-or-service-key"
+```
+
+For local development, set environment variables:
+
+```bash
+set SUPABASE_URL=your-supabase-project-url
+set SUPABASE_KEY=your-supabase-anon-or-service-key
+```
+
+On macOS/Linux, use:
+
+```bash
+export SUPABASE_URL=your-supabase-project-url
+export SUPABASE_KEY=your-supabase-anon-or-service-key
+```
+
+Dynamic data is saved to Supabase:
+
+- profiles in `users`
+- ratings in `ratings`
+- interaction context in `sessions`
+- custom drink rows in `custom_drinks`
+
+Static catalog files remain local:
+
+- `drinks.csv`
+- `ingredients.csv`
+- `drink_recipes.csv`
+- `ingredient_preferences.csv`
+
 ## Run the Streamlit App Locally
 
 From this folder, run:
@@ -187,6 +233,8 @@ Before saving a custom drink, AI Barista checks for duplicates by:
 If either check matches an existing custom drink, the app warns the user and does not save the duplicate.
 
 Find Drinks ranks results by `recommendation_score`. The score is based on profile matches, high past ratings, whether the user said they would order a drink again, and learned ingredient preference scores. Results also include an explanation showing how the score was calculated. Custom drinks are reloaded after saving, so they appear in future recommendation results.
+
+If exact filters return no drinks, AI Barista now falls back to close matches. Close matches are ranked by `recommendation_score` plus similarity to selected milk, temperature, caffeine, sweetness, dietary tag, and budget preferences. The app shows which filters were relaxed.
 
 ## Example Preferences
 
