@@ -622,13 +622,21 @@ def add_ingredient_section() -> None:
                 default_unit=default_unit,
             )
         except ValueError as error:
-            st.error(str(error))
+            if str(error) == "This ingredient already exists.":
+                st.warning("This ingredient already exists.")
+            else:
+                st.error(str(error))
             return
 
         refresh_data()
-        st.success(
-            f"Saved {ingredient['ingredient_name']} as {ingredient['ingredient_id']}."
-        )
+        st.success("Ingredient added successfully.")
+        st.caption(f"Saved {ingredient['ingredient_name']} as {ingredient['ingredient_id']}.")
+
+    st.markdown("### Ingredient list")
+    st.dataframe(
+        st.session_state.ingredients.sort_values(["category", "ingredient_name"]),
+        width="stretch",
+    )
 
 
 def rate_drink_section() -> None:

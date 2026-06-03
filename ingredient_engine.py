@@ -92,7 +92,7 @@ def load_custom_drinks() -> pd.DataFrame:
 
 def normalize_name(name: str) -> str:
     """Normalize a drink or ingredient name for duplicate checks."""
-    return re.sub(r"[^a-z0-9]", "", str(name).lower())
+    return re.sub(r"[^a-z0-9]", "", str(name).strip().lower())
 
 
 def recipe_signature(recipe_items: list[dict[str, object]]) -> str:
@@ -134,7 +134,7 @@ def add_ingredient(
     normalized_new_name = normalize_name(ingredient_name)
     existing_names = ingredients["ingredient_name"].apply(normalize_name)
     if normalized_new_name in set(existing_names):
-        raise ValueError("An ingredient with that name already exists.")
+        raise ValueError("This ingredient already exists.")
 
     ingredient = {
         "ingredient_id": next_ingredient_id(),
