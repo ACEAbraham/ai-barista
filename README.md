@@ -88,12 +88,14 @@ Each ingredient includes:
 - `calories`
 - `caffeine`
 - `price`
+- `default_unit`
 
 Each recipe row includes:
 
 - `drink_id`
 - `ingredient_id`
 - `quantity`
+- `unit`
 
 Each ingredient preference includes:
 
@@ -138,9 +140,53 @@ The original command-line app is still available:
 python main.py
 ```
 
-Use either the web app or the CLI to create or load a profile, find drinks, rate drinks, create ingredient-based custom drinks, view rating history, and view a taste profile.
+Use the web app to create or load a profile, find drinks, rate drinks, add ingredients, create ingredient-based custom drinks, view rating history, and view a taste profile.
 
-Find Drinks ranks results by `recommendation_score`. The score is based on profile matches, high past ratings, whether the user said they would order a drink again, and learned ingredient preference scores. Results also include an explanation showing how the score was calculated.
+## Custom Ingredients
+
+The Streamlit app includes an `Add Ingredient` section. New ingredients are saved to `ingredients.csv` with a unique `ingredient_id` and become available in the custom drink builder after saving.
+
+Supported categories are:
+
+- `base`
+- `milk`
+- `syrup`
+- `topping`
+- `sweetener`
+- `flavor`
+- `powder`
+- `ice`
+- `temperature`
+- `size`
+- `add-in`
+
+## Recipe Units
+
+Each recipe item in `drink_recipes.csv` stores both `quantity` and `unit`. Supported units are:
+
+- `oz`
+- `ml`
+- `pump`
+- `tsp`
+- `tbsp`
+- `shot`
+- `scoop`
+- `serving`
+- `cup`
+- `g`
+
+Nutrition and cost calculations currently use `quantity`. The `unit` is saved for display and future conversion work.
+
+## Duplicate Prevention
+
+Before saving a custom drink, AI Barista checks for duplicates by:
+
+- normalized drink name, using lowercase and removing spaces and punctuation
+- ingredient recipe signature, using `ingredient_id + quantity + unit`
+
+If either check matches an existing custom drink, the app warns the user and does not save the duplicate.
+
+Find Drinks ranks results by `recommendation_score`. The score is based on profile matches, high past ratings, whether the user said they would order a drink again, and learned ingredient preference scores. Results also include an explanation showing how the score was calculated. Custom drinks are reloaded after saving, so they appear in future recommendation results.
 
 ## Example Preferences
 

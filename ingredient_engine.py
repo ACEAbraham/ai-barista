@@ -1,6 +1,7 @@
 """Ingredient-based drink building for AI Barista."""
 
 from pathlib import Path
+import re
 
 import pandas as pd
 
@@ -11,8 +12,31 @@ CUSTOM_DRINKS_FILE = Path(__file__).with_name("custom_drinks.csv")
 PREFERENCES_FILE = Path(__file__).with_name("ingredient_preferences.csv")
 RATINGS_FILE = Path(__file__).with_name("ratings.csv")
 
-RECIPE_COLUMNS = ["drink_id", "ingredient_id", "quantity"]
+RECIPE_COLUMNS = ["drink_id", "ingredient_id", "quantity", "unit"]
 PREFERENCE_COLUMNS = ["user_id", "ingredient_id", "preference_score"]
+INGREDIENT_COLUMNS = [
+    "ingredient_id",
+    "ingredient_name",
+    "category",
+    "calories",
+    "caffeine",
+    "price",
+    "default_unit",
+]
+SUPPORTED_CATEGORIES = [
+    "base",
+    "milk",
+    "syrup",
+    "topping",
+    "sweetener",
+    "flavor",
+    "powder",
+    "ice",
+    "temperature",
+    "size",
+    "add-in",
+]
+SUPPORTED_UNITS = ["oz", "ml", "pump", "tsp", "tbsp", "shot", "scoop", "serving", "cup", "g"]
 
 FLAVOR_WEIGHTS = {
     "base": 3,
@@ -25,14 +49,110 @@ FLAVOR_WEIGHTS = {
 
 def load_ingredients() -> pd.DataFrame:
     """Load all available ingredients."""
-    return pd.read_csv(INGREDIENTS_FILE)
+    ingredients = pd.read_csv(INGREDIENTS_FILE)
+    if "default_unit" not in ingredients.columns:
+        ingredients["default_unit"] = "serving"
+    return ingredients
 
 
 def load_recipes() -> pd.DataFrame:
     """Load saved drink recipes."""
     if RECIPES_FILE.exists():
-        return pd.read_csv(RECIPES_FILE)
+        recipes = pd.read_csv(RECIPES_FILE)
+        if "unit" not in recipes.columns:
+            recipes["unit"] = "serving"
+        return recipes
     return pd.DataFrame(columns=RECIPE_COLUMNS)
+
+
+def normalize_name(name: str) -> str:
+    """Normalize a drink or ingredient name for duplicate checks."""
+    return re.sub(r"[^a-z0-9]", "", str(name).lower())
+
+
+def recipe_signature(recipe_items: list[dict[str, object]]) -> str:
+    """Build a stable ingredient + quantity + unit signature."""
+    normalized_items = []
+    for item in recipe_items:
+        ingredient_id = str(item["ingredient_id"]).strip()
+        quantity = float(item["quantity"])
+        unit = str(item.get("unit", "serving")).strip().lower()
+        normalized_items.append(f"{ingredient_id}:{quantity:g}:{unit}")
+    return "|".join(sorted(normalized_items))
+
+
+def next_ingredient_id() -> str:
+    """Create the next ingredient ID in the format ING-001."""
+    ingredients = load_ingredients()
+    if ingredients.empty:
+        return "ING-001"
+
+    numbers = ingredients["ingredient_id"].str.replace("ING-", "", regex=False).astype(int)
+    return f"ING-{numbers.max() + 1:03d}"
+
+
+def add_ingredient(
+    ingredient_name: str,
+    category: str,
+    calories: float,
+    caffeine: float,
+    price: float,
+    default_unit: str,
+) -> dict[str, object]:
+    """Add a new ingredient to ingredients.csv."""
+    ingredients = load_ingredients()
+    if category not in SUPPORTED_CATEGORIES:
+        raise ValueError(f"Unsupported category: {category}")
+    if default_unit not in SUPPORTED_UNITS:
+        raise ValueError(f"Unsupported unit: {default_unit}")
+
+    normalized_new_name = normalize_name(ingredient_name)
+    existing_names = ingredients["ingredient_name"].apply(normalize_name)
+    if normalized_new_name in set(existing_names):
+        raise ValueError("An ingredient with that name already exists.")
+
+    ingredient = {
+        "ingredient_id": next_ingredient_id(),
+        "ingredient_name": ingredient_name.strip(),
+        "category": category,
+        "calories": float(calories),
+        "caffeine": float(caffeine),
+        "price": float(price),
+        "default_unit": default_unit,
+    }
+    updated_ingredients = pd.concat(
+        [ingredients, pd.DataFrame([ingredient])],
+        ignore_index=True,
+    )
+    updated_ingredients.to_csv(INGREDIENTS_FILE, index=False)
+    return ingredient
+
+
+def custom_drink_exists(drink_name: str, recipe_items: list[dict[str, object]]) -> tuple[bool, str]:
+    """Check whether a custom drink duplicates a name or recipe signature."""
+    custom_drinks = (
+        pd.read_csv(CUSTOM_DRINKS_FILE)
+        if CUSTOM_DRINKS_FILE.exists()
+        else pd.DataFrame()
+    )
+    normalized_new_name = normalize_name(drink_name)
+    if not custom_drinks.empty and "drink_name" in custom_drinks.columns:
+        normalized_names = custom_drinks["drink_name"].astype(str).apply(normalize_name)
+        if normalized_new_name in set(normalized_names):
+            return True, "A custom drink with that name already exists."
+
+    recipes = load_recipes()
+    custom_ids = set(custom_drinks["drink_id"]) if not custom_drinks.empty else set()
+    if recipes.empty or not custom_ids:
+        return False, ""
+
+    new_signature = recipe_signature(recipe_items)
+    for drink_id, recipe_rows in recipes[recipes["drink_id"].isin(custom_ids)].groupby("drink_id"):
+        existing_items = recipe_rows[["ingredient_id", "quantity", "unit"]].to_dict("records")
+        if recipe_signature(existing_items) == new_signature:
+            return True, f"That recipe already exists as {drink_id}."
+
+    return False, ""
 
 
 def load_ingredient_preferences() -> pd.DataFrame:
@@ -147,7 +267,10 @@ def get_taste_profile(user_id: str) -> dict[str, pd.DataFrame]:
 
 def _next_custom_drink_id(drinks: pd.DataFrame) -> str:
     """Create the next custom drink ID in the format CUS-0001."""
-    custom_ids = drinks[drinks["drink_id"].astype(str).str.startswith("CUS-")]["drink_id"]
+    recipe_ids = load_recipes()["drink_id"] if RECIPES_FILE.exists() else pd.Series(dtype=str)
+    drink_ids = drinks["drink_id"] if "drink_id" in drinks.columns else pd.Series(dtype=str)
+    all_ids = pd.concat([drink_ids, recipe_ids], ignore_index=True).astype(str)
+    custom_ids = all_ids[all_ids.str.startswith("CUS-")]
     if custom_ids.empty:
         return "CUS-0001"
 
@@ -169,7 +292,7 @@ def show_ingredients_by_category(ingredients: pd.DataFrame) -> None:
 
 
 def parse_recipe_input(recipe_text: str) -> list[dict[str, object]]:
-    """Parse recipe input like ING-001:1, ING-010:2."""
+    """Parse recipe input like ING-001:1:shot, ING-010:2:oz."""
     recipe_items = []
     for item in recipe_text.split(","):
         if not item.strip():
@@ -180,11 +303,13 @@ def parse_recipe_input(recipe_text: str) -> list[dict[str, object]]:
         quantity = 1.0
         if len(parts) > 1:
             quantity = float(parts[1].strip())
+        unit = parts[2].strip() if len(parts) > 2 else "serving"
 
         recipe_items.append(
             {
                 "ingredient_id": ingredient_id,
                 "quantity": quantity,
+                "unit": unit,
             }
         )
     return recipe_items
@@ -339,6 +464,7 @@ def save_custom_drink_recipe(
             "drink_id": custom_drink["drink_id"],
             "ingredient_id": item["ingredient_id"],
             "quantity": item["quantity"],
+            "unit": item.get("unit", "serving"),
         }
         for item in recipe_items
     ]

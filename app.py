@@ -6,7 +6,11 @@ import streamlit as st
 from customization import log_session
 from drink_database import list_options, load_drinks
 from ingredient_engine import (
+    SUPPORTED_CATEGORIES,
+    SUPPORTED_UNITS,
+    add_ingredient,
     build_custom_drink_from_ingredients,
+    custom_drink_exists,
     get_taste_profile,
     load_ingredient_preferences,
     load_ingredients,
@@ -30,6 +34,7 @@ def refresh_data() -> None:
     """Reload CSV-backed app data after a save."""
     st.session_state.drinks = load_drinks()
     st.session_state.users = load_users()
+    st.session_state.ingredients = load_ingredients()
 
 
 def initialize_state() -> None:
@@ -40,6 +45,8 @@ def initialize_state() -> None:
         st.session_state.users = load_users()
     if "current_user" not in st.session_state:
         st.session_state.current_user = None
+    if "ingredients" not in st.session_state:
+        st.session_state.ingredients = load_ingredients()
 
 
 def current_user_label() -> str:
@@ -240,10 +247,14 @@ def ingredient_recipe_builder(ingredients: pd.DataFrame) -> list[dict[str, objec
         f"{row.ingredient_name} ({row.ingredient_id})": row.ingredient_id
         for row in ingredients.itertuples()
     }
+    unit_lookup = {
+        f"{row.ingredient_name} ({row.ingredient_id})": row.default_unit
+        for row in ingredients.itertuples()
+    }
 
     recipe_items = []
     for index in range(1, 9):
-        col1, col2 = st.columns([3, 1])
+        col1, col2, col3 = st.columns([3, 1, 1])
         with col1:
             selected = st.selectbox(
                 f"Ingredient {index}",
@@ -259,11 +270,21 @@ def ingredient_recipe_builder(ingredients: pd.DataFrame) -> list[dict[str, objec
                 step=0.5,
                 key=f"custom_quantity_{index}",
             )
+        with col3:
+            default_unit = unit_lookup.get(selected, "serving")
+            default_index = SUPPORTED_UNITS.index(default_unit) if default_unit in SUPPORTED_UNITS else 0
+            unit = st.selectbox(
+                "Unit",
+                SUPPORTED_UNITS,
+                index=default_index,
+                key=f"custom_unit_{index}",
+            )
         if selected != "None" and quantity > 0:
             recipe_items.append(
                 {
                     "ingredient_id": ingredient_lookup[selected],
                     "quantity": quantity,
+                    "unit": unit,
                 }
             )
 
@@ -274,7 +295,7 @@ def custom_drink_section() -> None:
     """Render ingredient-based custom drink UI."""
     st.subheader("Create Custom Ingredient-Based Drink")
     user = st.session_state.current_user
-    ingredients = load_ingredients()
+    ingredients = st.session_state.ingredients
 
     with st.expander("Ingredient catalog", expanded=False):
         st.dataframe(ingredients, width="stretch")
@@ -305,6 +326,10 @@ def custom_drink_section() -> None:
         except ValueError as error:
             st.error(str(error))
             return
+        exists, duplicate_reason = custom_drink_exists(custom_drink["drink_name"], recipe_items)
+        if exists:
+            st.warning(duplicate_reason)
+            return
 
         save_custom_drink_recipe(custom_drink, recipe_items)
         saved_rating = ""
@@ -324,6 +349,48 @@ def custom_drink_section() -> None:
         st.metric("Calories", custom_drink["calories"])
         st.metric("Price", f"${custom_drink['price']:.2f}")
         st.metric("Flavor score", f"{custom_drink['flavor_score']}/10")
+
+
+def add_ingredient_section() -> None:
+    """Render UI for adding a custom ingredient."""
+    st.subheader("Add Ingredient")
+    st.caption("New ingredients become available immediately in the custom drink builder.")
+
+    with st.form("add_ingredient_form"):
+        ingredient_name = st.text_input("Ingredient name")
+        category = st.selectbox("Category", SUPPORTED_CATEGORIES)
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            calories = st.number_input("Calories", min_value=0.0, max_value=1000.0, value=0.0)
+        with col2:
+            caffeine = st.number_input("Caffeine", min_value=0.0, max_value=500.0, value=0.0)
+        with col3:
+            price = st.number_input("Price", min_value=0.0, max_value=20.0, value=0.0, step=0.05)
+        with col4:
+            default_unit = st.selectbox("Default unit", SUPPORTED_UNITS)
+        submitted = st.form_submit_button("Save ingredient")
+
+    if submitted:
+        if not ingredient_name.strip():
+            st.error("Please enter an ingredient name.")
+            return
+        try:
+            ingredient = add_ingredient(
+                ingredient_name=ingredient_name,
+                category=category,
+                calories=calories,
+                caffeine=caffeine,
+                price=price,
+                default_unit=default_unit,
+            )
+        except ValueError as error:
+            st.error(str(error))
+            return
+
+        refresh_data()
+        st.success(
+            f"Saved {ingredient['ingredient_name']} as {ingredient['ingredient_id']}."
+        )
 
 
 def rate_drink_section() -> None:
@@ -425,6 +492,7 @@ def main() -> None:
             "Load profile",
             "Find recommended drinks",
             "Create custom drink",
+            "Add ingredient",
             "Rate a drink",
             "Rating history",
             "Taste profile",
@@ -440,10 +508,12 @@ def main() -> None:
     with sections[3]:
         custom_drink_section()
     with sections[4]:
-        rate_drink_section()
+        add_ingredient_section()
     with sections[5]:
-        rating_history_section()
+        rate_drink_section()
     with sections[6]:
+        rating_history_section()
+    with sections[7]:
         taste_profile_section()
 
 
