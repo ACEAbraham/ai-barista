@@ -32,40 +32,40 @@ def apply_theme() -> None:
         """
         <style>
         :root {
-            --ai-bg: #FAF7F2;
-            --ai-brown: #6F4E37;
-            --ai-espresso: #3B2A1A;
-            --ai-card: #FFFDF8;
-            --ai-tan: #D7B899;
+            --ai-bg: #DDD4C6;
+            --ai-section: #D0BCA8;
+            --ai-accent: #A07D61;
+            --ai-button: #76563A;
+            --ai-text: #4A2608;
+            --ai-secondary: #5C4033;
+            --ai-input: #FFFDF8;
         }
 
         .stApp {
             background: var(--ai-bg);
-            color: var(--ai-espresso);
+            color: var(--ai-text);
         }
 
         .stApp p,
         .stApp span,
         .stApp label,
-        .stApp div,
-        .stApp button,
         .stApp input,
         .stApp textarea {
-            color: var(--ai-espresso);
+            color: var(--ai-text);
         }
 
         .stApp small,
         .stApp [data-testid="stCaptionContainer"] {
-            color: #5C4033;
+            color: var(--ai-secondary);
         }
 
         [data-testid="stSidebar"] {
-            background: #FFF9EF;
-            border-right: 1px solid rgba(215, 184, 153, 0.45);
+            background: var(--ai-section);
+            border-right: 1px solid var(--ai-accent);
         }
 
         [data-testid="stSidebar"] * {
-            color: var(--ai-espresso);
+            color: var(--ai-text);
         }
 
         .block-container {
@@ -75,16 +75,16 @@ def apply_theme() -> None:
         }
 
         .ai-title-section {
-            background: linear-gradient(135deg, #FFFDF8 0%, #F7EBDC 100%);
-            border: 1px solid rgba(215, 184, 153, 0.5);
+            background: var(--ai-section);
+            border: 1px solid var(--ai-accent);
             border-radius: 22px;
             padding: 2rem 2.25rem;
             margin-bottom: 1.4rem;
-            box-shadow: 0 14px 36px rgba(59, 42, 26, 0.07);
+            box-shadow: 0 14px 36px rgba(74, 38, 8, 0.08);
         }
 
         .ai-title-section h1 {
-            color: var(--ai-brown);
+            color: var(--ai-text);
             font-size: 3rem;
             line-height: 1;
             margin: 0 0 0.6rem 0;
@@ -92,24 +92,37 @@ def apply_theme() -> None:
         }
 
         .ai-title-section p {
-            color: var(--ai-espresso);
+            color: var(--ai-secondary);
             font-size: 1.06rem;
             margin: 0;
         }
 
         h2, h3 {
-            color: var(--ai-espresso) !important;
+            color: var(--ai-text) !important;
             letter-spacing: 0;
+        }
+
+        input,
+        textarea,
+        [role="combobox"] {
+            background-color: var(--ai-input) !important;
+            color: var(--ai-text) !important;
+            border-color: var(--ai-accent) !important;
+        }
+
+        input::placeholder,
+        textarea::placeholder {
+            color: var(--ai-secondary) !important;
         }
 
         button[role="tab"],
         button[role="tab"] * {
-            color: var(--ai-espresso) !important;
+            color: var(--ai-text) !important;
         }
 
         button[role="tab"][aria-selected="true"],
         button[role="tab"][aria-selected="true"] * {
-            color: var(--ai-brown) !important;
+            color: var(--ai-text) !important;
             font-weight: 700;
         }
 
@@ -117,53 +130,64 @@ def apply_theme() -> None:
         [role="listbox"] *,
         [role="option"],
         [role="option"] * {
-            color: var(--ai-espresso) !important;
-            background-color: var(--ai-card);
+            color: var(--ai-text) !important;
+            background-color: var(--ai-input) !important;
         }
 
         [role="option"]:hover,
         [role="option"]:hover * {
-            color: var(--ai-brown) !important;
-            background-color: #F3E7D8;
+            color: var(--ai-text) !important;
+            background-color: var(--ai-section) !important;
         }
 
         [role="radiogroup"] label,
         [role="radiogroup"] label * {
-            color: var(--ai-espresso) !important;
+            color: var(--ai-text) !important;
         }
 
-        button,
-        button * {
-            color: var(--ai-espresso);
+        button:not([role="tab"]) {
+            background-color: var(--ai-button) !important;
+            color: #FFFFFF !important;
+            border-color: var(--ai-button) !important;
+        }
+
+        button:not([role="tab"]) * {
+            color: #FFFFFF !important;
+        }
+
+        button:not([role="tab"]):hover {
+            background-color: var(--ai-text) !important;
+            border-color: var(--ai-text) !important;
+            color: #FFFFFF !important;
         }
 
         .ai-card {
-            background: var(--ai-card);
-            border: 1px solid rgba(215, 184, 153, 0.55);
+            background: var(--ai-section);
+            border: 1px solid var(--ai-accent);
             border-radius: 20px;
             padding: 1.15rem 1.25rem;
             margin: 0.85rem 0;
-            box-shadow: 0 12px 30px rgba(59, 42, 26, 0.06);
+            box-shadow: 0 12px 30px rgba(74, 38, 8, 0.08);
         }
 
         .ai-card-title {
-            color: var(--ai-espresso);
+            color: var(--ai-text);
             font-size: 1.12rem;
             font-weight: 800;
             margin-bottom: 0.45rem;
         }
 
         .ai-card-meta {
-            color: rgba(59, 42, 26, 0.72);
+            color: var(--ai-secondary);
             font-size: 0.92rem;
             margin-bottom: 0.75rem;
         }
 
         .ai-score {
             display: inline-block;
-            background: rgba(111, 78, 55, 0.12);
-            color: var(--ai-brown);
-            border: 1px solid rgba(111, 78, 55, 0.22);
+            background: var(--ai-input);
+            color: var(--ai-button);
+            border: 1px solid var(--ai-accent);
             border-radius: 999px;
             padding: 0.22rem 0.65rem;
             font-weight: 800;
@@ -172,9 +196,9 @@ def apply_theme() -> None:
         }
 
         .ai-explanation {
-            background: rgba(215, 184, 153, 0.26);
-            border-left: 4px solid var(--ai-tan);
-            color: var(--ai-espresso);
+            background: var(--ai-input);
+            border-left: 4px solid var(--ai-accent);
+            color: var(--ai-text);
             border-radius: 14px;
             padding: 0.75rem 0.85rem;
             font-size: 0.92rem;
