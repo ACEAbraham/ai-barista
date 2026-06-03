@@ -44,10 +44,6 @@ def apply_theme() -> None:
             color: var(--ai-espresso);
         }
 
-        [data-testid="stHeader"] {
-            background: rgba(250, 247, 242, 0.88);
-        }
-
         [data-testid="stSidebar"] {
             background: #FFF9EF;
             border-right: 1px solid rgba(215, 184, 153, 0.45);
@@ -80,73 +76,11 @@ def apply_theme() -> None:
             color: var(--ai-espresso);
             font-size: 1.06rem;
             margin: 0;
-            opacity: 0.82;
         }
 
         h2, h3 {
             color: var(--ai-espresso) !important;
             letter-spacing: 0;
-        }
-
-        div[data-testid="stForm"],
-        div[data-testid="stExpander"] {
-            background: var(--ai-card);
-            border: 1px solid rgba(215, 184, 153, 0.45);
-            border-radius: 18px;
-            padding: 1rem;
-            box-shadow: 0 10px 28px rgba(59, 42, 26, 0.05);
-        }
-
-        .stTabs [data-baseweb="tab-list"] {
-            gap: 0.35rem;
-        }
-
-        .stTabs [data-baseweb="tab"] {
-            border-radius: 999px;
-            padding: 0.55rem 0.95rem;
-            color: var(--ai-espresso);
-        }
-
-        .stTabs [aria-selected="true"] {
-            background: #EFE0CC;
-            color: var(--ai-brown);
-        }
-
-        .stButton > button,
-        .stFormSubmitButton > button {
-            background: var(--ai-brown);
-            color: #FFFDF8;
-            border: 1px solid var(--ai-brown);
-            border-radius: 999px;
-            padding: 0.55rem 1.1rem;
-            font-weight: 700;
-            box-shadow: 0 8px 18px rgba(111, 78, 55, 0.18);
-        }
-
-        .stButton > button:hover,
-        .stFormSubmitButton > button:hover {
-            background: #5F412D;
-            color: #FFFDF8;
-            border-color: #5F412D;
-        }
-
-        [data-baseweb="input"],
-        [data-baseweb="select"] > div,
-        [data-baseweb="textarea"] {
-            background: #FFFDF8;
-            border-color: rgba(111, 78, 55, 0.28);
-            border-radius: 12px;
-        }
-
-        label, .stCaption, [data-testid="stMarkdownContainer"] {
-            color: var(--ai-espresso);
-        }
-
-        .stAlert {
-            border-radius: 16px;
-            border: 1px solid rgba(215, 184, 153, 0.55);
-            background: #FFF8EA;
-            color: var(--ai-espresso);
         }
 
         .ai-card {
