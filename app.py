@@ -44,9 +44,28 @@ def apply_theme() -> None:
             color: var(--ai-espresso);
         }
 
+        .stApp p,
+        .stApp span,
+        .stApp label,
+        .stApp div,
+        .stApp button,
+        .stApp input,
+        .stApp textarea {
+            color: var(--ai-espresso);
+        }
+
+        .stApp small,
+        .stApp [data-testid="stCaptionContainer"] {
+            color: #5C4033;
+        }
+
         [data-testid="stSidebar"] {
             background: #FFF9EF;
             border-right: 1px solid rgba(215, 184, 153, 0.45);
+        }
+
+        [data-testid="stSidebar"] * {
+            color: var(--ai-espresso);
         }
 
         .block-container {
@@ -81,6 +100,41 @@ def apply_theme() -> None:
         h2, h3 {
             color: var(--ai-espresso) !important;
             letter-spacing: 0;
+        }
+
+        button[role="tab"],
+        button[role="tab"] * {
+            color: var(--ai-espresso) !important;
+        }
+
+        button[role="tab"][aria-selected="true"],
+        button[role="tab"][aria-selected="true"] * {
+            color: var(--ai-brown) !important;
+            font-weight: 700;
+        }
+
+        [role="listbox"],
+        [role="listbox"] *,
+        [role="option"],
+        [role="option"] * {
+            color: var(--ai-espresso) !important;
+            background-color: var(--ai-card);
+        }
+
+        [role="option"]:hover,
+        [role="option"]:hover * {
+            color: var(--ai-brown) !important;
+            background-color: #F3E7D8;
+        }
+
+        [role="radiogroup"] label,
+        [role="radiogroup"] label * {
+            color: var(--ai-espresso) !important;
+        }
+
+        button,
+        button * {
+            color: var(--ai-espresso);
         }
 
         .ai-card {
