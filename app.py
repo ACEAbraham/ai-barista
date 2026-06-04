@@ -22,7 +22,14 @@ from ingredient_engine import (
     save_custom_drink_recipe,
 )
 from openai_client import generate_drink_recommendation, openai_is_configured
-from profile import create_user, get_user_history, load_ratings, load_user, save_rating
+from profile import (
+    create_user,
+    get_user_history,
+    load_ratings,
+    load_user,
+    load_user_by_id_or_name,
+    save_rating,
+)
 from profile import load_users as load_supabase_users
 from recommender import find_similar_drinks, recommend_with_fallback
 from supabase_client import insert_row, supabase_is_configured, update_rows
@@ -220,6 +227,13 @@ def apply_theme() -> None:
             margin-bottom: 1rem;
             color: var(--ai-text);
         }
+
+        .flow-progress {
+            color: var(--ai-secondary);
+            font-size: 0.9rem;
+            font-weight: 700;
+            margin: 0.25rem 0 1rem 0;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -255,6 +269,18 @@ def initialize_state() -> None:
         st.session_state.selected_drink_id = None
     if "consumer_matches" not in st.session_state:
         st.session_state.consumer_matches = None
+    if "flow_step" not in st.session_state:
+        st.session_state.flow_step = 1
+    if "profile_mode" not in st.session_state:
+        st.session_state.profile_mode = None
+    if "today_goal" not in st.session_state:
+        st.session_state.today_goal = None
+    if "today_temperature" not in st.session_state:
+        st.session_state.today_temperature = None
+    if "today_context" not in st.session_state:
+        st.session_state.today_context = {}
+    if "flow_message" not in st.session_state:
+        st.session_state.flow_message = None
 
 
 def save_warning() -> None:
@@ -1193,6 +1219,410 @@ def taste_profile_section() -> None:
         )
 
 
+def _set_flow_step(step: int) -> None:
+    """Move the guided experience to a new step."""
+    st.session_state.flow_step = step
+    st.rerun()
+
+
+def guided_welcome_step() -> None:
+    """Render the welcome step."""
+    st.markdown("## Welcome")
+    st.write("Create a taste profile, tell us what today needs, and meet your drink.")
+    if st.button("Start", type="primary", use_container_width=True):
+        _set_flow_step(2)
+
+
+def guided_profile_step() -> None:
+    """Render profile creation or loading as one guided step."""
+    st.markdown("## Create or Load Profile")
+    st.write("Do you already have a profile?")
+    create_col, load_col = st.columns(2)
+    with create_col:
+        if st.button("Create New Profile", use_container_width=True):
+            st.session_state.profile_mode = "create"
+            st.rerun()
+    with load_col:
+        if st.button("Load Existing Profile", use_container_width=True):
+            st.session_state.profile_mode = "load"
+            st.rerun()
+
+    if st.session_state.profile_mode == "create":
+        with st.form("guided_create_profile"):
+            name = st.text_input("Name")
+            favorite_milk = st.selectbox(
+                "Favorite milk",
+                list_options(st.session_state.drinks, "milk"),
+            )
+            caffeine_tolerance = st.selectbox(
+                "Caffeine tolerance",
+                list_options(st.session_state.drinks, "caffeine_level"),
+            )
+            preferred_sweetness = st.selectbox(
+                "Sweetness preference",
+                list_options(st.session_state.drinks, "sweetness_level"),
+            )
+            favorite_flavors = st.text_input(
+                "Favorite flavors",
+                placeholder="Vanilla, caramel, cinnamon...",
+            )
+            disliked_flavors = st.text_input(
+                "Disliked flavors",
+                placeholder="Bitter chocolate, coconut...",
+            )
+            submitted = st.form_submit_button(
+                "Create Profile",
+                type="primary",
+                use_container_width=True,
+            )
+        if submitted:
+            if not name.strip():
+                st.error("Please enter your name.")
+                return
+            try:
+                user = create_user(
+                    name=name.strip(),
+                    favorite_milk=favorite_milk,
+                    favorite_temperature="no preference",
+                    caffeine_tolerance=caffeine_tolerance,
+                    preferred_sweetness=preferred_sweetness,
+                )
+            except RuntimeError as error:
+                st.error(str(error))
+                return
+            st.session_state.current_user = user
+            st.session_state.profile_flavors = {
+                "favorite": favorite_flavors.strip(),
+                "disliked": disliked_flavors.strip(),
+            }
+            refresh_data()
+            st.session_state.flow_message = "Profile created successfully."
+            st.session_state.flow_step = 3
+            st.rerun()
+
+    elif st.session_state.profile_mode == "load":
+        with st.form("guided_load_profile"):
+            lookup = st.text_input("Profile ID or name")
+            submitted = st.form_submit_button(
+                "Load Profile",
+                type="primary",
+                use_container_width=True,
+            )
+        if submitted:
+            user = load_user_by_id_or_name(lookup)
+            if user is None:
+                st.error("No profile matched that ID or name.")
+                return
+            st.session_state.current_user = user
+            st.session_state.flow_message = f"Welcome back, {user['name']}."
+            st.session_state.flow_step = 3
+            st.rerun()
+
+
+def guided_context_step() -> None:
+    """Render today's visual context choices."""
+    st.markdown("## Today's Context")
+    st.write("What are you looking for today?")
+    goals = [
+        ("⚡ Energy", "energy"),
+        ("🎯 Focus", "focus"),
+        ("😌 Comfort", "comfort"),
+        ("🏋️ Workout", "workout"),
+        ("🍰 Treat", "treat"),
+    ]
+    goal_columns = st.columns(len(goals))
+    for column, (label, value) in zip(goal_columns, goals):
+        with column:
+            button_label = f"✓ {label}" if st.session_state.today_goal == value else label
+            if st.button(button_label, key=f"guided_goal_{value}", use_container_width=True):
+                st.session_state.today_goal = value
+                st.rerun()
+
+    st.write("Hot or iced?")
+    temperatures = [
+        ("🧊 Iced", "iced"),
+        ("🔥 Hot", "hot"),
+        ("🤷 No Preference", None),
+    ]
+    temperature_columns = st.columns(3)
+    for column, (label, value) in zip(temperature_columns, temperatures):
+        with column:
+            selected = st.session_state.today_temperature == value and (
+                value is not None or "temperature_selected" in st.session_state
+            )
+            button_label = f"✓ {label}" if selected else label
+            if st.button(
+                button_label,
+                key=f"guided_temperature_{value}",
+                use_container_width=True,
+            ):
+                st.session_state.today_temperature = value
+                st.session_state.temperature_selected = True
+                st.rerun()
+
+    with st.expander("Fine-tune recommendation", expanded=False):
+        weather = st.selectbox(
+            "Weather",
+            ["Not specified", "Sunny", "Cloudy", "Rainy", "Snowy", "Hot", "Cold"],
+            key="guided_weather",
+        )
+        sleep_hours = st.number_input(
+            "Sleep hours",
+            min_value=0.0,
+            max_value=16.0,
+            value=7.0,
+            step=0.5,
+            key="guided_sleep",
+        )
+        stress_level = st.selectbox(
+            "Stress level",
+            ["Not specified", "Low", "Medium", "High"],
+            key="guided_stress",
+        )
+        love_today = st.text_input("Anything you love today", key="guided_love")
+        avoid_today = st.text_input("Anything you want to avoid", key="guided_avoid")
+
+    ready = (
+        st.session_state.today_goal is not None
+        and "temperature_selected" in st.session_state
+    )
+    if st.button(
+        "Get My Drink",
+        type="primary",
+        use_container_width=True,
+        disabled=not ready,
+    ):
+        user = st.session_state.current_user
+        matches, _, _ = recommend_with_fallback(
+            drinks=st.session_state.drinks,
+            temperature=st.session_state.today_temperature,
+            user=user,
+            user_history=get_user_history(user["user_id"]) if user else None,
+            ingredient_preferences=get_ingredient_preferences(user["user_id"]) if user else None,
+            drink_recipes=load_recipes(),
+        )
+        profile_flavors = st.session_state.get("profile_flavors", {})
+        notes = " ".join(
+            value
+            for value in [
+                str(profile_flavors.get("favorite", "")).strip(),
+                str(profile_flavors.get("disliked", "")).strip(),
+                love_today.strip(),
+                avoid_today.strip(),
+            ]
+            if value
+        )
+        if notes:
+            matches["recommendation_explanation"] = (
+                matches["recommendation_explanation"].astype(str)
+                + f"; considered today's notes: {notes}"
+            )
+        st.session_state.consumer_matches = matches
+        st.session_state.today_context = {
+            "sleep_hours": sleep_hours,
+            "stress_level": stress_level.lower(),
+            "goal": st.session_state.today_goal,
+            "weather": weather.lower(),
+        }
+        if not matches.empty and supabase_is_configured():
+            try:
+                log_session(
+                    user_id=user["user_id"] if user else "guest",
+                    drink_id=str(matches.iloc[0]["drink_id"]),
+                    rating="",
+                    **st.session_state.today_context,
+                )
+            except RuntimeError as error:
+                st.error(str(error))
+                return
+        _set_flow_step(4)
+
+
+def render_guided_recommendation_cards(matches: pd.DataFrame, limit: int = 3) -> None:
+    """Render recommendation cards that advance into the guided detail step."""
+    rows = list(matches.head(limit).iterrows())
+    for column, (_, drink) in zip(st.columns(len(rows)), rows):
+        with column:
+            with st.container(border=True):
+                st.image(get_drink_image(drink.to_dict()), width="stretch")
+                st.markdown(f"### {drink.get('drink_name', 'Recommended drink')}")
+                st.markdown(f"**{_match_percentage(drink.get('recommendation_score'))}% match**")
+                st.caption(str(drink.get("recommendation_explanation", _drink_description(drink))))
+                if st.button(
+                    "View Details",
+                    key=f"guided_details_{drink.get('drink_id')}",
+                    use_container_width=True,
+                ):
+                    st.session_state.selected_drink_id = drink.get("drink_id")
+                    _set_flow_step(5)
+
+
+def guided_recommendation_step() -> None:
+    """Render up to three guided recommendations."""
+    st.markdown("## Your Recommendations")
+    matches = st.session_state.consumer_matches
+    if matches is None or matches.empty:
+        st.warning("No recommendations are ready yet.")
+        if st.button("Back to Today's Context"):
+            _set_flow_step(3)
+        return
+    render_guided_recommendation_cards(matches)
+
+
+def _selected_guided_drink() -> pd.Series | None:
+    """Return the selected drink, including its recommendation score."""
+    drink_id = st.session_state.selected_drink_id
+    scored = st.session_state.consumer_matches
+    if scored is not None:
+        matches = scored[scored["drink_id"].astype(str) == str(drink_id)]
+        if not matches.empty:
+            return matches.iloc[0]
+    matches = st.session_state.drinks[
+        st.session_state.drinks["drink_id"].astype(str) == str(drink_id)
+    ]
+    return None if matches.empty else matches.iloc[0]
+
+
+def guided_detail_step() -> None:
+    """Render guided drink details without showing the rating form yet."""
+    drink = _selected_guided_drink()
+    if drink is None:
+        st.warning("That drink is no longer available.")
+        return
+
+    col1, col2 = st.columns([1, 1.2])
+    with col1:
+        st.image(get_drink_image(drink.to_dict()), width="stretch")
+    with col2:
+        st.header(str(drink.get("drink_name", "Drink details")))
+        st.info(str(drink.get("recommendation_explanation", "Recommended for your taste.")))
+        st.write(f"**Ingredients:** {drink.get('flavor_profile', 'Not available')}")
+        st.write(
+            f"**Caffeine:** {drink.get('caffeine_level', 'unknown')}  \n"
+            f"**Calories:** {drink.get('calories', 'N/A')}  \n"
+            f"**Sweetness:** {drink.get('sweetness_level', 'unknown')}  \n"
+            f"**Dietary tags:** {drink.get('dietary_tags', 'none listed')}"
+        )
+        rate_col, another_col = st.columns(2)
+        with rate_col:
+            if st.button("Rate this drink", type="primary", use_container_width=True):
+                _set_flow_step(6)
+        with another_col:
+            if st.button("Recommend another", use_container_width=True):
+                st.session_state.consumer_matches = None
+                st.session_state.selected_drink_id = None
+                _set_flow_step(3)
+
+    st.subheader("Similar drinks")
+    similar = find_similar_drinks(st.session_state.drinks, drink, limit=3)
+    render_guided_recommendation_cards(similar, limit=3)
+
+
+def guided_rating_step() -> None:
+    """Collect feedback and complete the guided journey."""
+    drink = _selected_guided_drink()
+    user = st.session_state.current_user
+    if drink is None or not user:
+        st.warning("Load a profile and select a drink before rating.")
+        return
+
+    st.markdown("## How good was this recommendation?")
+    with st.form("guided_rating_form"):
+        rating = st.slider("Rating", 1, 5, 4)
+        would_order_again = st.radio("Would order again?", ["Yes", "No"], horizontal=True)
+        feedback_text = st.text_area("Optional feedback text")
+        submitted = st.form_submit_button(
+            "Save Feedback",
+            type="primary",
+            use_container_width=True,
+        )
+    if submitted:
+        try:
+            save_rating(
+                user["user_id"],
+                str(drink["drink_id"]),
+                rating,
+                would_order_again == "Yes",
+            )
+            log_session(
+                user_id=user["user_id"],
+                drink_id=str(drink["drink_id"]),
+                rating=rating,
+                **st.session_state.today_context,
+            )
+            if feedback_text.strip():
+                try:
+                    insert_row(
+                        "drink_feedback",
+                        {
+                            "user_id": user["user_id"],
+                            "drink_id": str(drink["drink_id"]),
+                            "feedback_text": feedback_text.strip(),
+                            "created_at": datetime.now(timezone.utc).isoformat(),
+                        },
+                    )
+                except Exception:
+                    pass
+        except RuntimeError as error:
+            st.error(str(error))
+            return
+        st.session_state.feedback_saved = True
+
+    if st.session_state.get("feedback_saved"):
+        st.success("Thanks — your feedback helps AI Barista learn your taste.")
+        another_col, profile_col = st.columns(2)
+        with another_col:
+            if st.button("Get another recommendation", use_container_width=True):
+                st.session_state.feedback_saved = False
+                st.session_state.consumer_matches = None
+                st.session_state.selected_drink_id = None
+                _set_flow_step(3)
+        with profile_col:
+            if st.button("View profile", use_container_width=True):
+                st.session_state.feedback_saved = False
+                _set_flow_step(7)
+
+
+def guided_profile_summary_step() -> None:
+    """Show the loaded profile after the journey."""
+    user = st.session_state.current_user
+    st.markdown("## Your Profile")
+    if not user:
+        st.info("No profile is loaded.")
+        return
+    st.write(f"**Name:** {user.get('name')}")
+    st.write(f"**Favorite milk:** {user.get('favorite_milk')}")
+    st.write(f"**Caffeine tolerance:** {user.get('caffeine_tolerance')}")
+    st.write(f"**Preferred sweetness:** {user.get('preferred_sweetness')}")
+    with st.expander("Taste profile", expanded=False):
+        taste_profile_section()
+    if st.button("Get another recommendation", type="primary", use_container_width=True):
+        _set_flow_step(3)
+
+
+def guided_flow() -> None:
+    """Render exactly one step of the main onboarding and recommendation flow."""
+    step = int(st.session_state.flow_step)
+    st.markdown(f'<div class="flow-progress">Step {min(step, 6)} of 6</div>', unsafe_allow_html=True)
+    if st.session_state.flow_message:
+        st.success(st.session_state.flow_message)
+        st.session_state.flow_message = None
+    if step == 1:
+        guided_welcome_step()
+    elif step == 2:
+        guided_profile_step()
+    elif step == 3:
+        guided_context_step()
+    elif step == 4:
+        guided_recommendation_step()
+    elif step == 5:
+        guided_detail_step()
+    elif step == 6:
+        guided_rating_step()
+    else:
+        guided_profile_summary_step()
+
+
 def main() -> None:
     """Run the Streamlit app."""
     st.set_page_config(page_title="AI Barista", layout="wide")
@@ -1203,7 +1633,7 @@ def main() -> None:
         """
         <section class="ai-title-section">
             <h1>☕ AI Barista</h1>
-            <p>Personalized recommendations powered by your taste profile.</p>
+            <p>Your personal drink recommendation engine.</p>
         </section>
         """,
         unsafe_allow_html=True,
@@ -1214,48 +1644,7 @@ def main() -> None:
             "but recommendations and feedback require SUPABASE_URL and SUPABASE_KEY."
         )
 
-    st.markdown(
-        f'<div class="profile-status"><strong>Taste profile:</strong> {safe_text(current_user_label())}</div>',
-        unsafe_allow_html=True,
-    )
-
-    action1, action2, action3 = st.columns(3)
-    with action1:
-        if st.button("Create Profile", key="home_create_profile", use_container_width=True):
-            st.session_state.home_view = "create_profile"
-            st.session_state.selected_drink_id = None
-            st.rerun()
-    with action2:
-        if st.button("Load Profile", key="home_load_profile", use_container_width=True):
-            st.session_state.home_view = "load_profile"
-            st.session_state.selected_drink_id = None
-            st.rerun()
-    with action3:
-        if st.button(
-            "Get Recommendation",
-            key="home_get_recommendation",
-            type="primary",
-            use_container_width=True,
-        ):
-            st.session_state.home_view = "recommend"
-            st.session_state.selected_drink_id = None
-            st.rerun()
-
-    view = st.session_state.home_view
-    if view == "create_profile":
-        create_profile_section()
-        if st.session_state.current_user:
-            with st.expander("Your taste profile", expanded=False):
-                taste_profile_section()
-    elif view == "load_profile":
-        load_profile_section()
-        if st.session_state.current_user:
-            with st.expander("Rating history", expanded=False):
-                rating_history_section()
-    elif view == "details":
-        drink_detail_section()
-    else:
-        consumer_recommendation_section()
+    guided_flow()
 
     with st.expander("Advanced Tools", expanded=False):
         advanced = st.tabs(

@@ -252,12 +252,14 @@ from `requirements.txt`.
 
 ## Beta Experience
 
-The first screen is intentionally simple:
+The main app is a guided journey that shows one step at a time:
 
-1. Enter sleep, stress, goal, weather, temperature, and a few loves or hates.
-2. Receive exactly one structured OpenAI recommendation.
-3. Rate the recommendation and say whether you would order it again.
-4. Save context, recommendation JSON, rating, and timestamp to Supabase.
+1. Start from the welcome screen.
+2. Create a new profile or load an existing profile by ID or name.
+3. Choose today's goal and temperature, with optional context refinement.
+4. View one to three personalized recommendation cards.
+5. Open drink details and similar drinks.
+6. Rate the recommendation and continue with a stronger taste profile.
 
 All catalog, profile, customization, ingredient, rule-based recommendation,
 history, and taste-profile features remain available inside `Advanced Tools`.

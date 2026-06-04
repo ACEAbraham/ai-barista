@@ -64,6 +64,22 @@ def load_user(user_id: str) -> dict[str, str] | None:
     return matches.iloc[0].to_dict()
 
 
+def load_user_by_id_or_name(value: str) -> dict[str, str] | None:
+    """Load a profile using either its user ID or exact name."""
+    users = load_users()
+    if users.empty:
+        return None
+
+    query = str(value).strip().lower()
+    matches = users[
+        (users["user_id"].astype(str).str.lower() == query)
+        | (users["name"].astype(str).str.lower() == query)
+    ]
+    if matches.empty:
+        return None
+    return matches.iloc[0].to_dict()
+
+
 def save_rating(
     user_id: str,
     drink_id: str,
