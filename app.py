@@ -6,6 +6,7 @@ from html import escape
 import pandas as pd
 import streamlit as st
 
+from analytics import track_recommendation_event
 from customization import log_recommendation_session, log_session
 from drink_database import list_options, load_drinks
 from drink_images import get_drink_image
@@ -22,11 +23,8 @@ from ingredient_engine import (
     load_recipes,
     save_custom_drink_recipe,
 )
-from openai_client import (
-    build_user_memory_summary,
-    generate_ai_recommendation,
-    openai_is_configured,
-)
+from openai_client import build_user_memory_summary, openai_is_configured
+from openai_recommender import get_ai_recommendations
 from profile import (
     create_user,
     get_user_history,
@@ -218,6 +216,25 @@ def apply_theme() -> None:
             font-size: 0.92rem;
         }
 
+        .experimental-card {
+            background: var(--ai-input);
+            border: 1px solid var(--ai-accent);
+            border-radius: 8px;
+            box-shadow: 0 0 16px rgba(118, 86, 58, 0.20);
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .experimental-badge {
+            display: inline-block;
+            background: var(--ai-button);
+            color: #FFFFFF !important;
+            border-radius: 999px;
+            padding: 0.2rem 0.55rem;
+            font-size: 0.78rem;
+            font-weight: 700;
+        }
+
         [data-testid="stImage"] img {
             border-radius: 12px;
             border: 1px solid var(--ai-accent);
@@ -376,6 +393,12 @@ def initialize_state() -> None:
         st.session_state.ai_memory_summary = None
     if "ai_fallback_matches" not in st.session_state:
         st.session_state.ai_fallback_matches = None
+    if "ai_candidate_drinks" not in st.session_state:
+        st.session_state.ai_candidate_drinks = None
+    if "ai_selected_drink_id" not in st.session_state:
+        st.session_state.ai_selected_drink_id = None
+    if "ai_cache_used" not in st.session_state:
+        st.session_state.ai_cache_used = False
     if "home_view" not in st.session_state:
         st.session_state.home_view = "recommend"
     if "selected_drink_id" not in st.session_state:
