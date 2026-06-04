@@ -234,6 +234,110 @@ def apply_theme() -> None:
             font-weight: 700;
             margin: 0.25rem 0 1rem 0;
         }
+
+        .profile-card {
+            background: var(--ai-input);
+            border: 1px solid var(--ai-accent);
+            border-radius: 18px;
+            padding: 1.4rem;
+            margin: 0.75rem 0 1.25rem 0;
+            box-shadow: 0 10px 26px rgba(74, 38, 8, 0.07);
+        }
+
+        .profile-card-header {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .profile-avatar {
+            width: 64px;
+            height: 64px;
+            border-radius: 50%;
+            background: var(--ai-button);
+            color: #FFFFFF;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+            font-weight: 800;
+            flex: 0 0 64px;
+        }
+
+        .profile-name {
+            color: var(--ai-text);
+            font-size: 1.45rem;
+            font-weight: 800;
+        }
+
+        .profile-badges,
+        .taste-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.55rem;
+        }
+
+        .profile-badge,
+        .taste-chip {
+            background: var(--ai-section);
+            border: 1px solid var(--ai-accent);
+            border-radius: 999px;
+            color: var(--ai-text);
+            padding: 0.38rem 0.7rem;
+            font-size: 0.88rem;
+            font-weight: 700;
+        }
+
+        .taste-section {
+            background: var(--ai-input);
+            border: 1px solid var(--ai-accent);
+            border-radius: 14px;
+            padding: 1rem;
+            min-height: 130px;
+        }
+
+        .taste-section-title {
+            color: var(--ai-text);
+            font-weight: 800;
+            margin-bottom: 0.7rem;
+        }
+
+        .taste-empty {
+            color: var(--ai-secondary);
+            font-size: 0.92rem;
+        }
+
+        div[data-testid="stExpander"] {
+            background: var(--ai-input);
+            border: 1px solid var(--ai-button);
+            border-radius: 14px;
+            margin: 1rem 0;
+            overflow: hidden;
+        }
+
+        div[data-testid="stExpander"] summary {
+            background: var(--ai-section);
+            padding: 0.85rem 1rem;
+            color: var(--ai-text);
+            font-weight: 800;
+        }
+
+        div[data-testid="stExpander"] summary:hover {
+            background: var(--ai-accent);
+        }
+
+        div[data-testid="stExpander"] details > div {
+            background: var(--ai-input);
+            padding: 0.4rem 0.9rem 0.9rem 0.9rem;
+        }
+
+        [data-testid="stDataFrame"] {
+            background: var(--ai-input);
+            border: 1px solid var(--ai-accent);
+            border-radius: 12px;
+            padding: 0.35rem;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -342,6 +446,80 @@ def safe_text(value: object, fallback: str = "") -> str:
     if pd.isna(value):
         return fallback
     return escape(str(value))
+
+
+def _initials(name: object) -> str:
+    """Return up to two initials for a profile avatar."""
+    parts = [part for part in str(name).strip().split() if part]
+    return "".join(part[0].upper() for part in parts[:2]) or "AB"
+
+
+def _chip_html(label: object) -> str:
+    """Return one escaped taste-profile chip."""
+    return f'<span class="taste-chip">{safe_text(label)}</span>'
+
+
+def _ingredient_chips(
+    rows: pd.DataFrame,
+    value_column: str | None = None,
+    limit: int = 8,
+) -> str:
+    """Render ingredient rows as compact HTML chips."""
+    if rows.empty:
+        return '<div class="taste-empty">Rate a few drinks to build your taste profile.</div>'
+
+    chips = []
+    for _, row in rows.head(limit).iterrows():
+        label = str(row.get("ingredient_name", "Ingredient"))
+        if value_column and value_column in row and not pd.isna(row[value_column]):
+            label = f"{label} · {float(row[value_column]):g}"
+        chips.append(_chip_html(label))
+    return f'<div class="taste-chips">{"".join(chips)}</div>'
+
+
+def render_profile_card(user: dict[str, object]) -> None:
+    """Render profile identity and preference badges."""
+    st.markdown(
+        f"""
+        <div class="profile-card">
+            <div class="profile-card-header">
+                <div class="profile-avatar">{_initials(user.get("name", ""))}</div>
+                <div>
+                    <div class="profile-name">{safe_text(user.get("name", "Taste Explorer"))}</div>
+                    <div class="ai-card-meta">{safe_text(user.get("user_id", ""))}</div>
+                </div>
+            </div>
+            <div class="profile-badges">
+                <span class="profile-badge">Favorite Milk: {safe_text(user.get("favorite_milk", "Not set"))}</span>
+                <span class="profile-badge">Caffeine: {safe_text(user.get("caffeine_tolerance", "Not set"))}</span>
+                <span class="profile-badge">Sweetness: {safe_text(user.get("preferred_sweetness", "Not set"))}</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_taste_profile_cards(user_id: str) -> None:
+    """Render learned ingredient preferences without raw dataframes."""
+    profile = get_taste_profile(user_id)
+    col1, col2, col3 = st.columns(3)
+    sections = [
+        ("Favorite ingredients", profile["favorite"], "preference_score"),
+        ("Least favorite ingredients", profile["least_favorite"], "preference_score"),
+        ("Most common ingredients", profile["most_common"], "times_seen"),
+    ]
+    for column, (title, rows, score_column) in zip((col1, col2, col3), sections):
+        with column:
+            st.markdown(
+                f"""
+                <div class="taste-section">
+                    <div class="taste-section-title">{title}</div>
+                    {_ingredient_chips(rows, score_column)}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
 
 def render_recommendation_cards(matches: pd.DataFrame, limit: int = 10) -> None:
@@ -1191,32 +1369,14 @@ def rating_history_section() -> None:
 
 def taste_profile_section() -> None:
     """Render taste profile UI."""
-    st.subheader("View Taste Profile")
+    st.subheader("Your Taste Profile")
     user = st.session_state.current_user
     if not user:
         st.info("Load or create a profile first.")
         return
 
-    profile = get_taste_profile(user["user_id"])
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.write("Favorite ingredients")
-        st.dataframe(
-            profile["favorite"][["ingredient_name", "preference_score"]].head(10),
-            width="stretch",
-        )
-    with col2:
-        st.write("Least favorite ingredients")
-        st.dataframe(
-            profile["least_favorite"][["ingredient_name", "preference_score"]].head(10),
-            width="stretch",
-        )
-    with col3:
-        st.write("Most common ingredients")
-        st.dataframe(
-            profile["most_common"][["ingredient_name", "times_seen"]].head(10),
-            width="stretch",
-        )
+    render_profile_card(user)
+    render_taste_profile_cards(user["user_id"])
 
 
 def _set_flow_step(step: int) -> None:
@@ -1360,7 +1520,11 @@ def guided_context_step() -> None:
                 st.session_state.temperature_selected = True
                 st.rerun()
 
-    with st.expander("Fine-tune recommendation", expanded=False):
+    with st.expander(
+        "✨ Fine-tune recommendation · Add sleep, stress, weather, or flavor preferences.",
+        expanded=False,
+    ):
+        st.caption("Optional details can make today's recommendation feel more precise.")
         weather = st.selectbox(
             "Weather",
             ["Not specified", "Sunny", "Cloudy", "Rainy", "Snowy", "Hot", "Cold"],
@@ -1586,16 +1750,12 @@ def guided_rating_step() -> None:
 def guided_profile_summary_step() -> None:
     """Show the loaded profile after the journey."""
     user = st.session_state.current_user
-    st.markdown("## Your Profile")
+    st.markdown("## Your Taste Profile")
     if not user:
         st.info("No profile is loaded.")
         return
-    st.write(f"**Name:** {user.get('name')}")
-    st.write(f"**Favorite milk:** {user.get('favorite_milk')}")
-    st.write(f"**Caffeine tolerance:** {user.get('caffeine_tolerance')}")
-    st.write(f"**Preferred sweetness:** {user.get('preferred_sweetness')}")
-    with st.expander("Taste profile", expanded=False):
-        taste_profile_section()
+    render_profile_card(user)
+    render_taste_profile_cards(user["user_id"])
     if st.button("Get another recommendation", type="primary", use_container_width=True):
         _set_flow_step(3)
 
@@ -1646,7 +1806,11 @@ def main() -> None:
 
     guided_flow()
 
-    with st.expander("Advanced Tools", expanded=False):
+    with st.expander(
+        "⚙️ Advanced Tools · Create custom drinks, add ingredients, and explore your data.",
+        expanded=False,
+    ):
+        st.caption("Database and customization tools for deeper exploration.")
         advanced = st.tabs(
             [
                 "Create Custom Drink",
