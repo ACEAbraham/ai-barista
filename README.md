@@ -1,9 +1,9 @@
 # AI Barista
 
-AI Barista is an OpenAI-powered beverage recommendation beta. The main
-experience asks for a little context, recommends exactly one drink, collects
-feedback, and saves the full interaction for future learning. Existing catalog
-and customization features remain available under `Advanced Tools`.
+AI Barista is a polished rule-based beverage recommendation beta. The main
+experience guides users from a taste profile through context, recommendations,
+drink details, and feedback while collecting clean data for future learning.
+Existing catalog and customization features remain available under `Advanced Tools`.
 
 ## Project Files
 
@@ -261,12 +261,16 @@ The main app is a guided journey that shows one step at a time:
 5. Open drink details and similar drinks.
 6. Rate the recommendation and continue with a stronger taste profile.
 
+The welcome screen also provides direct actions for starting a recommendation,
+creating or loading a profile, and viewing the current profile. Persistent
+sidebar navigation lets users manually jump to Home, My Profile, Get
+Recommendation, or Advanced Tools without removing the guided journey.
+
 All catalog, profile, customization, ingredient, rule-based recommendation,
 history, and taste-profile features remain available inside `Advanced Tools`.
 
-The generated recommendation uses `gpt-5.4-mini` by default. Set an optional
-`OPENAI_MODEL` Streamlit secret or environment variable to use another
-structured-output-capable model.
+The consumer recommendation journey currently uses the rule-based scoring and
+fallback system. OpenAI is not exposed in the beta product experience yet.
 
 ## CLI Option
 
@@ -280,7 +284,10 @@ Use the web app to create or load a profile, find drinks, rate drinks, add ingre
 
 ## Custom Ingredients
 
-The Streamlit app includes an `Add Ingredient` section. New ingredients are saved to `ingredients.csv` with a unique `ingredient_id` and become available in the custom drink builder after saving.
+The Streamlit app includes an `Add Ingredient` section. New ingredients are saved
+to `ingredients.csv` with a unique `ingredient_id`, collected in Supabase when
+an `ingredients` table is available, and become available in the custom drink
+builder immediately. A missing Supabase ingredients table does not crash the app.
 
 Supported categories are:
 

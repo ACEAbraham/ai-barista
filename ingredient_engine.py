@@ -124,7 +124,7 @@ def add_ingredient(
     price: float,
     default_unit: str,
 ) -> dict[str, object]:
-    """Add a new ingredient to ingredients.csv."""
+    """Add a new ingredient locally and collect it in Supabase when available."""
     ingredients = load_ingredients()
     if category not in SUPPORTED_CATEGORIES:
         raise ValueError(f"Unsupported category: {category}")
@@ -150,6 +150,10 @@ def add_ingredient(
         ignore_index=True,
     )
     updated_ingredients.to_csv(INGREDIENTS_FILE, index=False)
+    try:
+        insert_row("ingredients", ingredient)
+    except Exception as error:
+        LOGGER.warning("Ingredient saved locally, but Supabase collection failed: %s", error)
     return ingredient
 
 

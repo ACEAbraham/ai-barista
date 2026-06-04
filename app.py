@@ -371,8 +371,16 @@ def initialize_state() -> None:
         st.session_state.home_view = "recommend"
     if "selected_drink_id" not in st.session_state:
         st.session_state.selected_drink_id = None
+    if "selected_drink" not in st.session_state:
+        st.session_state.selected_drink = None
     if "consumer_matches" not in st.session_state:
         st.session_state.consumer_matches = None
+    if "recommendation_results" not in st.session_state:
+        st.session_state.recommendation_results = None
+    if st.session_state.recommendation_results is None and st.session_state.consumer_matches is not None:
+        st.session_state.recommendation_results = st.session_state.consumer_matches
+    if st.session_state.selected_drink is None and st.session_state.selected_drink_id is not None:
+        st.session_state.selected_drink = {"drink_id": st.session_state.selected_drink_id}
     if "flow_step" not in st.session_state:
         st.session_state.flow_step = 1
     if "current_step" not in st.session_state:
@@ -618,7 +626,7 @@ def _save_favorite(user_id: str, drink_id: str) -> tuple[bool, str]:
             },
         )
     except Exception:
-        return False, "Favorites are not available yet, but this drink will stay in your recent recommendations."
+        return False, "Favorites coming soon."
     return True, "Saved to favorites."
 
 
@@ -792,6 +800,7 @@ def consumer_recommendation_section() -> None:
                 "recommendation_explanation"
             ].astype(str) + f"; considered your notes: {query}"
         st.session_state.consumer_matches = matches
+        st.session_state.recommendation_results = matches
         if not matches.empty and supabase_is_configured():
             try:
                 log_session(
@@ -1581,8 +1590,8 @@ def guided_context_step() -> None:
             ["Not specified", "Low", "Medium", "High"],
             key="guided_stress",
         )
-        love_today = st.text_input("Anything you love today", key="guided_love")
-        avoid_today = st.text_input("Anything you want to avoid", key="guided_avoid")
+        love_today = st.text_input("Things I love today", key="guided_love")
+        avoid_today = st.text_input("Things I want to avoid", key="guided_avoid")
 
     ready = (
         st.session_state.today_goal is not None
@@ -1595,7 +1604,7 @@ def guided_context_step() -> None:
         disabled=not ready,
     ):
         user = st.session_state.current_user
-        matches, _, _ = recommend_with_fallback(
+        matches, exact_match, relaxed_filters = recommend_with_fallback(
             drinks=st.session_state.drinks,
             temperature=st.session_state.today_temperature,
             user=user,
@@ -1620,6 +1629,9 @@ def guided_context_step() -> None:
                 + f"; considered today's notes: {notes}"
             )
         st.session_state.consumer_matches = matches
+        st.session_state.recommendation_results = matches
+        st.session_state.guided_exact_match = exact_match
+        st.session_state.guided_relaxed_filters = relaxed_filters
         st.session_state.today_context = {
             "sleep_hours": sleep_hours,
             "stress_level": stress_level.lower(),
@@ -1656,6 +1668,7 @@ def render_guided_recommendation_cards(matches: pd.DataFrame, limit: int = 3) ->
                     use_container_width=True,
                 ):
                     st.session_state.selected_drink_id = drink.get("drink_id")
+                    st.session_state.selected_drink = drink.to_dict()
                     _set_flow_step(5)
 
 
@@ -1668,6 +1681,11 @@ def guided_recommendation_step() -> None:
         if st.button("Back to Today's Context"):
             _set_flow_step(3)
         return
+    if not st.session_state.get("guided_exact_match", True):
+        st.info("No exact match found, but try this instead.")
+        relaxed = st.session_state.get("guided_relaxed_filters", [])
+        if relaxed:
+            st.caption(f"Relaxed filters: {', '.join(relaxed)}")
     render_guided_recommendation_cards(matches)
 
 
@@ -1697,6 +1715,8 @@ def guided_detail_step() -> None:
         st.image(get_drink_image(drink.to_dict()), width="stretch")
     with col2:
         st.header(str(drink.get("drink_name", "Drink details")))
+        st.markdown(f"**{_match_percentage(drink.get('recommendation_score'))}% match**")
+        st.write(_drink_description(drink))
         st.info(str(drink.get("recommendation_explanation", "Recommended for your taste.")))
         st.write(f"**Ingredients:** {drink.get('flavor_profile', 'Not available')}")
         st.write(
@@ -1712,8 +1732,30 @@ def guided_detail_step() -> None:
         with another_col:
             if st.button("Recommend another", use_container_width=True):
                 st.session_state.consumer_matches = None
+                st.session_state.recommendation_results = None
                 st.session_state.selected_drink_id = None
+                st.session_state.selected_drink = None
                 _set_flow_step(3)
+
+        user = st.session_state.current_user
+        if st.button("Save to Favorites", use_container_width=True, key="guided_save_favorite"):
+            if not user:
+                st.info("Load or create a profile to save favorites.")
+            else:
+                saved, message = _save_favorite(user["user_id"], str(drink["drink_id"]))
+                (st.success if saved else st.info)(message)
+
+    ratings = load_ratings()
+    drink_ratings = (
+        ratings[ratings["drink_id"].astype(str) == str(drink["drink_id"])]
+        if not ratings.empty
+        else ratings
+    )
+    if not drink_ratings.empty:
+        st.caption(
+            f"User rating: {drink_ratings['rating'].astype(float).mean():.1f}/5 "
+            f"from {len(drink_ratings)} rating(s)"
+        )
 
     st.subheader("Similar drinks")
     similar = find_similar_drinks(st.session_state.drinks, drink, limit=3)
@@ -1777,7 +1819,9 @@ def guided_rating_step() -> None:
             if st.button("Get another recommendation", use_container_width=True):
                 st.session_state.feedback_saved = False
                 st.session_state.consumer_matches = None
+                st.session_state.recommendation_results = None
                 st.session_state.selected_drink_id = None
+                st.session_state.selected_drink = None
                 _set_flow_step(3)
         with profile_col:
             if st.button("View profile", use_container_width=True):
@@ -1892,7 +1936,6 @@ def advanced_tools_section(expanded: bool = False) -> None:
         with advanced[3]:
             admin_tabs = st.tabs(
                 [
-                    "OpenAI beta",
                     "Rule-based recommendations",
                     "Rate drink",
                     "Rating history",
@@ -1900,14 +1943,12 @@ def advanced_tools_section(expanded: bool = False) -> None:
                 ]
             )
             with admin_tabs[0]:
-                ai_recommendation_section()
-            with admin_tabs[1]:
                 recommendation_section()
-            with admin_tabs[2]:
+            with admin_tabs[1]:
                 rate_drink_section()
-            with admin_tabs[3]:
+            with admin_tabs[2]:
                 rating_history_section()
-            with admin_tabs[4]:
+            with admin_tabs[3]:
                 taste_profile_section()
 
 
