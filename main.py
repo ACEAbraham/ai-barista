@@ -175,6 +175,14 @@ def find_drinks(drinks, current_user: dict[str, str] | None) -> None:
             else None
         ),
         drink_recipes=load_recipes(),
+        context={
+            **context,
+            "temperature_preference": temperature or "no preference",
+            "caffeine_preference": caffeine_level or "any",
+            "sweetness_preference": sweetness_level or "any",
+            "likes": "",
+            "dislikes": "",
+        },
     )
     display_matches(matches)
     if not matches.empty:

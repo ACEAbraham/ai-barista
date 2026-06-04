@@ -139,3 +139,32 @@ def log_session(
         "rating": rating,
     }
     return insert_row("sessions", session)
+
+
+def log_recommendation_session(
+    user_id: str,
+    context: dict[str, object],
+    drink_id: str,
+    score: int | float,
+    explanation: str,
+    rating: int | str = "",
+) -> dict[str, object]:
+    """Save a scored recommendation context for future model training."""
+    session = {
+        "user_id": user_id,
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "goal": context.get("goal", ""),
+        "sleep_hours": context.get("sleep_hours", ""),
+        "stress_level": context.get("stress_level", ""),
+        "weather": context.get("weather", ""),
+        "temperature_preference": context.get("temperature_preference", ""),
+        "caffeine_preference": context.get("caffeine_preference", ""),
+        "sweetness_preference": context.get("sweetness_preference", ""),
+        "likes": context.get("likes", ""),
+        "dislikes": context.get("dislikes", ""),
+        "drink_id": drink_id,
+        "recommendation_score": float(score),
+        "recommendation_explanation": explanation,
+        "rating": rating,
+    }
+    return insert_row("recommendation_sessions", session)

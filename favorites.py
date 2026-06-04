@@ -1,6 +1,7 @@
 """Supabase-backed favorites storage for AI Barista."""
 
 from datetime import datetime, timezone
+import logging
 
 import pandas as pd
 
@@ -8,6 +9,7 @@ from supabase_client import get_supabase, insert_row
 
 
 FAVORITE_COLUMNS = ["id", "created_at", "user_id", "drink_id", "drink_name"]
+LOGGER = logging.getLogger(__name__)
 
 
 def get_user_favorites(user_id: str) -> pd.DataFrame:
@@ -26,7 +28,14 @@ def get_user_favorites(user_id: str) -> pd.DataFrame:
         .order("created_at", desc=True)
         .execute()
     )
-    return pd.DataFrame(response.data or [], columns=FAVORITE_COLUMNS)
+    rows = response.data or []
+    if not rows:
+        return pd.DataFrame(columns=FAVORITE_COLUMNS)
+    favorites = pd.DataFrame(rows)
+    for column in FAVORITE_COLUMNS:
+        if column not in favorites.columns:
+            favorites[column] = None
+    return favorites[FAVORITE_COLUMNS]
 
 
 def is_favorite(user_id: str, drink_id: str) -> bool:
@@ -43,15 +52,21 @@ def save_favorite(user_id: str, drink_id: str, drink_name: str) -> dict[str, obj
     """Save a favorite unless the user has already saved that drink."""
     if is_favorite(user_id, drink_id):
         return None
-    return insert_row(
-        "favorites",
-        {
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "user_id": user_id,
-            "drink_id": drink_id,
-            "drink_name": drink_name,
-        },
-    )
+    try:
+        return insert_row(
+            "favorites",
+            {
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "user_id": user_id,
+                "drink_id": drink_id,
+                "drink_name": drink_name,
+            },
+        )
+    except Exception:
+        # A database-level unique constraint closes the race between check and insert.
+        if is_favorite(user_id, drink_id):
+            return None
+        raise
 
 
 def remove_favorite(user_id: str, drink_id: str) -> bool:

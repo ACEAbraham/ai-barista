@@ -6,7 +6,7 @@ from html import escape
 import pandas as pd
 import streamlit as st
 
-from customization import log_session
+from customization import log_recommendation_session, log_session
 from drink_database import list_options, load_drinks
 from drink_images import get_drink_image
 from favorites import get_user_favorites, remove_favorite, save_favorite
@@ -1649,6 +1649,16 @@ def guided_context_step() -> None:
             ["Not specified", "Low", "Medium", "High"],
             key="guided_stress",
         )
+        caffeine_preference = st.selectbox(
+            "Caffeine preference",
+            ["Any", "None", "Low", "Medium", "High"],
+            key="guided_caffeine_preference",
+        )
+        sweetness_preference = st.selectbox(
+            "Sweetness preference",
+            ["Any", "Unsweetened", "Light", "Classic", "Extra"],
+            key="guided_sweetness_preference",
+        )
         love_today = st.text_input("Things I love today", key="guided_love")
         avoid_today = st.text_input("Things I want to avoid", key="guided_avoid")
 
@@ -1663,6 +1673,34 @@ def guided_context_step() -> None:
         disabled=not ready,
     ):
         user = st.session_state.current_user
+        profile_flavors = st.session_state.get("profile_flavors", {})
+        likes = ", ".join(
+            value
+            for value in [
+                str(profile_flavors.get("favorite", "")).strip(),
+                love_today.strip(),
+            ]
+            if value
+        )
+        dislikes = ", ".join(
+            value
+            for value in [
+                str(profile_flavors.get("disliked", "")).strip(),
+                avoid_today.strip(),
+            ]
+            if value
+        )
+        context = {
+            "sleep_hours": sleep_hours,
+            "stress_level": stress_level.lower(),
+            "goal": st.session_state.today_goal,
+            "weather": weather.lower(),
+            "temperature_preference": st.session_state.today_temperature or "no preference",
+            "caffeine_preference": caffeine_preference.lower(),
+            "sweetness_preference": sweetness_preference.lower(),
+            "likes": likes,
+            "dislikes": dislikes,
+        }
         matches, exact_match, relaxed_filters = recommend_with_fallback(
             drinks=st.session_state.drinks,
             temperature=st.session_state.today_temperature,
@@ -1670,41 +1708,35 @@ def guided_context_step() -> None:
             user_history=get_user_history(user["user_id"]) if user else None,
             ingredient_preferences=get_ingredient_preferences(user["user_id"]) if user else None,
             drink_recipes=load_recipes(),
+            context=context,
         )
-        profile_flavors = st.session_state.get("profile_flavors", {})
-        notes = " ".join(
-            value
-            for value in [
-                str(profile_flavors.get("favorite", "")).strip(),
-                str(profile_flavors.get("disliked", "")).strip(),
-                love_today.strip(),
-                avoid_today.strip(),
-            ]
-            if value
-        )
-        if notes:
-            matches["recommendation_explanation"] = (
-                matches["recommendation_explanation"].astype(str)
-                + f"; considered today's notes: {notes}"
-            )
         st.session_state.consumer_matches = matches
         st.session_state.recommendation_results = matches
         st.session_state.guided_exact_match = exact_match
         st.session_state.guided_relaxed_filters = relaxed_filters
-        st.session_state.today_context = {
-            "sleep_hours": sleep_hours,
-            "stress_level": stress_level.lower(),
-            "goal": st.session_state.today_goal,
-            "weather": weather.lower(),
-        }
+        st.session_state.today_context = context
         if not matches.empty and supabase_is_configured():
             try:
+                top_match = matches.iloc[0]
                 log_session(
                     user_id=user["user_id"] if user else "guest",
-                    drink_id=str(matches.iloc[0]["drink_id"]),
+                    drink_id=str(top_match["drink_id"]),
                     rating="",
-                    **st.session_state.today_context,
+                    sleep_hours=str(context["sleep_hours"]),
+                    stress_level=str(context["stress_level"]),
+                    goal=str(context["goal"]),
+                    weather=str(context["weather"]),
                 )
+                try:
+                    log_recommendation_session(
+                        user_id=user["user_id"] if user else "guest",
+                        context=context,
+                        drink_id=str(top_match["drink_id"]),
+                        score=top_match.get("recommendation_score", 0),
+                        explanation=str(top_match.get("recommendation_explanation", "")),
+                    )
+                except Exception:
+                    pass
             except RuntimeError as error:
                 st.error(str(error))
                 return
@@ -1720,7 +1752,7 @@ def render_guided_recommendation_cards(matches: pd.DataFrame, limit: int = 3) ->
                 st.image(get_drink_image(drink.to_dict()), width="stretch")
                 st.markdown(f"### {drink.get('drink_name', 'Recommended drink')}")
                 st.markdown(f"**{_match_percentage(drink.get('recommendation_score'))}% match**")
-                st.caption(str(drink.get("recommendation_explanation", _drink_description(drink))))
+                st.caption(str(drink.get("recommendation_summary", _drink_description(drink))))
                 if st.button(
                     "View Details",
                     key=f"guided_details_{drink.get('drink_id')}",
@@ -1741,7 +1773,7 @@ def guided_recommendation_step() -> None:
             _set_flow_step(3)
         return
     if not st.session_state.get("guided_exact_match", True):
-        st.info("No exact match found, but try this instead.")
+        st.info("No exact match found, but this is close.")
         relaxed = st.session_state.get("guided_relaxed_filters", [])
         if relaxed:
             st.caption(f"Relaxed filters: {', '.join(relaxed)}")
@@ -1776,7 +1808,19 @@ def guided_detail_step() -> None:
         st.header(str(drink.get("drink_name", "Drink details")))
         st.markdown(f"**{_match_percentage(drink.get('recommendation_score'))}% match**")
         st.write(_drink_description(drink))
+        st.subheader("Why this was recommended")
         st.info(str(drink.get("recommendation_explanation", "Recommended for your taste.")))
+        score_parts = [
+            ("Context", drink.get("context_score", 0)),
+            ("Profile", drink.get("profile_score", 0)),
+            ("Ingredients", drink.get("ingredient_preference_score", 0)),
+            ("Past ratings", drink.get("past_rating_score", 0)),
+            ("Close match", drink.get("fallback_similarity_score", 0)),
+        ]
+        st.caption(
+            "Score: "
+            + " + ".join(f"{label} {int(float(value or 0))}" for label, value in score_parts)
+        )
         st.write(f"**Ingredients:** {drink.get('flavor_profile', 'Not available')}")
         st.write(
             f"**Caffeine:** {drink.get('caffeine_level', 'unknown')}  \n"
@@ -1855,8 +1899,22 @@ def guided_rating_step() -> None:
                 user_id=user["user_id"],
                 drink_id=str(drink["drink_id"]),
                 rating=rating,
-                **st.session_state.today_context,
+                sleep_hours=str(st.session_state.today_context.get("sleep_hours", "")),
+                stress_level=str(st.session_state.today_context.get("stress_level", "")),
+                goal=str(st.session_state.today_context.get("goal", "")),
+                weather=str(st.session_state.today_context.get("weather", "")),
             )
+            try:
+                log_recommendation_session(
+                    user_id=user["user_id"],
+                    context=st.session_state.today_context,
+                    drink_id=str(drink["drink_id"]),
+                    score=drink.get("recommendation_score", 0),
+                    explanation=str(drink.get("recommendation_explanation", "")),
+                    rating=rating,
+                )
+            except Exception:
+                pass
             if feedback_text.strip():
                 try:
                     insert_row(

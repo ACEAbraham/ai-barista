@@ -1,5 +1,7 @@
 """Filtering and scoring helpers for AI Barista recommendations."""
 
+import re
+
 import pandas as pd
 
 
@@ -39,13 +41,211 @@ def _add_reason(
     mask: pd.Series,
     points: int,
     reason: str,
+    component: str | None = None,
 ) -> None:
     """Add score points and explanation text to matching rows."""
     drinks.loc[mask, "recommendation_score"] += points
+    if component:
+        drinks.loc[mask, component] += points
     drinks.loc[mask, "recommendation_explanation"] = drinks.loc[
         mask,
         "recommendation_explanation",
     ].apply(lambda text: f"{text}; {reason}" if text else reason)
+
+
+def _drink_search_text(drink: dict[str, object] | pd.Series) -> str:
+    """Combine searchable drink attributes into one normalized string."""
+    columns = [
+        "drink_name",
+        "base",
+        "milk",
+        "syrup",
+        "flavor_profile",
+        "ingredients",
+        "dietary_tags",
+        "toppings",
+    ]
+    return " ".join(_clean_value(drink.get(column, "")) for column in columns)
+
+
+def _phrases(value: object) -> list[str]:
+    """Split comma-separated preference notes into useful searchable phrases."""
+    if value is None or pd.isna(value):
+        return []
+    return [
+        phrase.strip().lower()
+        for phrase in re.split(r"[,;|]", str(value))
+        if phrase.strip()
+    ]
+
+
+def _calculate_context_score_details(
+    drink: dict[str, object] | pd.Series,
+    context: dict[str, object] | None,
+) -> tuple[int, list[str]]:
+    """Return a context score and transparent reasons for one drink."""
+    if not context:
+        return 0, []
+
+    score = 0
+    reasons: list[str] = []
+    text = _drink_search_text(drink)
+    base = _clean_value(drink.get("base", ""))
+    temperature = _clean_value(drink.get("temperature", ""))
+    caffeine = _clean_value(drink.get("caffeine_level", ""))
+    sweetness = _clean_value(drink.get("sweetness_level", ""))
+    milk = _clean_value(drink.get("milk", ""))
+    calories = pd.to_numeric(drink.get("calories", 0), errors="coerce")
+    calories = 0 if pd.isna(calories) else float(calories)
+
+    def add(points: int, reason: str) -> None:
+        nonlocal score
+        score += points
+        reasons.append(f"{points:+d} {reason}")
+
+    energy_bases = ("espresso", "cold brew", "americano", "shaken espresso")
+    focus_bases = ("americano", "cold brew", "matcha", "flat white")
+    comfort_bases = ("latte", "mocha", "cappuccino", "chai", "tea")
+    workout_bases = ("cold brew", "espresso", "americano", "tea", "refresher")
+    treat_bases = ("mocha", "frappuccino", "flavored latte")
+
+    goal = _clean_value(context.get("goal", ""))
+    if goal == "energy":
+        if caffeine in {"medium", "high"}:
+            add(12 if caffeine == "high" else 10, f"goal: energy favors {caffeine} caffeine")
+        elif caffeine in {"none", "low"}:
+            add(-12, f"goal: energy is less suited to {caffeine} caffeine")
+        if any(term in text for term in energy_bases):
+            add(10, "goal: energy favors espresso, cold brew, or americano")
+    elif goal == "focus":
+        if caffeine == "medium":
+            add(12, "goal: focus favors medium caffeine")
+        if any(term in text for term in focus_bases):
+            add(10, "goal: focus favors americano, cold brew, matcha, or flat white")
+        if sweetness == "extra":
+            add(-8, "goal: focus avoids extra-sweet drinks")
+    elif goal == "comfort":
+        if temperature == "hot":
+            add(10, "goal: comfort favors hot drinks")
+        if any(term in text for term in comfort_bases) or milk not in {"", "none"}:
+            add(10, "goal: comfort favors creamy latte, mocha, chai, or tea styles")
+        if sweetness in {"classic", "extra"}:
+            add(4, "goal: comfort slightly favors familiar sweetness")
+    elif goal == "workout":
+        if calories <= 120:
+            add(8, "goal: workout favors lighter drinks")
+        elif calories >= 250:
+            add(-10, "goal: workout avoids very high-calorie drinks")
+        if any(term in text for term in workout_bases):
+            add(10, "goal: workout favors cold brew, espresso, americano, tea, or refreshers")
+        if sweetness == "extra":
+            add(-8, "goal: workout avoids extra sweetness")
+        if any(term in text for term in ("heavy cream", "whipped cream", "sweet cream")):
+            add(-8, "goal: workout avoids heavy cream")
+    elif goal == "treat":
+        if any(term in text for term in treat_bases):
+            add(12, "goal: treat favors mocha, frappuccino, or flavored latte styles")
+        if sweetness in {"classic", "extra"}:
+            add(8, "goal: treat favors classic or extra sweetness")
+        if _clean_value(drink.get("syrup", "")) not in {"", "none"} or _clean_value(
+            drink.get("toppings", "")
+        ) not in {"", "none"}:
+            add(5, "goal: treat favors syrups and toppings")
+
+    sleep = pd.to_numeric(context.get("sleep_hours"), errors="coerce")
+    if not pd.isna(sleep):
+        if sleep < 5:
+            if caffeine in {"medium", "high"}:
+                add(10 if caffeine == "high" else 8, "short sleep favors a caffeine lift")
+            elif caffeine == "none":
+                add(-10, "short sleep is less suited to no caffeine")
+        elif sleep < 7 and caffeine == "medium":
+            add(7, "moderate sleep favors medium caffeine")
+        elif sleep >= 7 and caffeine == "high":
+            add(-3, "rested context avoids over-boosting high caffeine")
+
+    stress = _clean_value(context.get("stress_level", ""))
+    if stress == "high":
+        if any(term in text for term in comfort_bases):
+            add(8, "high stress favors comforting latte, tea, matcha, or chai styles")
+        if caffeine == "high":
+            add(-12, "high stress avoids very high caffeine")
+
+    weather = _clean_value(context.get("weather", ""))
+    if weather in {"sunny", "hot", "warm"}:
+        if temperature in {"iced", "blended"}:
+            add(10, f"{weather} weather favors iced or blended drinks")
+        if any(term in text for term in ("cold brew", "refresher")):
+            add(8, f"{weather} weather favors cold brew or refreshers")
+    elif weather in {"cold", "rainy", "snowy"}:
+        if temperature == "hot":
+            add(10, f"{weather} weather favors hot drinks")
+        if any(term in text for term in comfort_bases):
+            add(8, f"{weather} weather favors latte, mocha, chai, cappuccino, or tea")
+
+    temperature_preference = _clean_value(context.get("temperature_preference", ""))
+    if temperature_preference in {"iced", "hot"}:
+        if temperature == temperature_preference or (
+            temperature_preference == "iced" and temperature == "blended"
+        ):
+            add(14, f"matches {temperature_preference} temperature preference")
+        else:
+            add(-6, f"does not match {temperature_preference} temperature preference")
+
+    caffeine_preference = _clean_value(context.get("caffeine_preference", ""))
+    if caffeine_preference == "none":
+        if caffeine == "none":
+            add(24, "matches no-caffeine preference")
+        elif caffeine == "low":
+            add(5, "low caffeine is close to no-caffeine preference")
+        elif caffeine in {"medium", "high"}:
+            add(-25, "conflicts with no-caffeine preference")
+    elif caffeine_preference in {"low", "medium", "high"}:
+        if caffeine == caffeine_preference:
+            add(14, f"matches {caffeine_preference} caffeine preference")
+        elif caffeine_preference == "low" and caffeine == "high":
+            add(-8, "high caffeine conflicts with low-caffeine preference")
+
+    sweetness_preference = _clean_value(context.get("sweetness_preference", ""))
+    if sweetness_preference == "unsweetened":
+        if sweetness == "unsweetened":
+            add(14, "matches unsweetened preference")
+        elif sweetness == "light":
+            add(5, "light sweetness is close to unsweetened preference")
+        elif sweetness == "extra":
+            add(-10, "extra sweetness conflicts with unsweetened preference")
+    elif sweetness_preference in {"light", "classic", "extra"} and sweetness == sweetness_preference:
+        add(14, f"matches {sweetness_preference} sweetness preference")
+
+    for phrase in _phrases(context.get("likes", "")):
+        if phrase in text:
+            add(6, f"contains liked {phrase}")
+    for phrase in _phrases(context.get("dislikes", "")):
+        if phrase in text:
+            add(-20, f"contains disliked {phrase}")
+
+    return score, reasons
+
+
+def calculate_context_score(
+    drink: dict[str, object] | pd.Series,
+    context: dict[str, object] | None,
+) -> int:
+    """Calculate the context-only score for one drink."""
+    return _calculate_context_score_details(drink, context)[0]
+
+
+def _short_reason(explanation: str) -> str:
+    """Create a compact, consumer-friendly reason from detailed score reasons."""
+    positive = [
+        reason.strip()
+        for reason in str(explanation).split(";")
+        if reason.strip().startswith("+")
+    ]
+    if positive:
+        selected = [re.sub(r"^\+\d+\s*", "", reason) for reason in positive[:3]]
+        return "Based on your preferences and context: " + ", ".join(selected) + "."
+    return "Based on your preferences and context, this is one of the closest available drinks."
 
 
 def filter_by_caffeine(drinks: pd.DataFrame, caffeine_level: str | None) -> pd.DataFrame:
@@ -132,11 +332,23 @@ def add_recommendation_scores(
     user_history: pd.DataFrame | None = None,
     ingredient_preferences: pd.DataFrame | None = None,
     drink_recipes: pd.DataFrame | None = None,
+    context: dict[str, object] | None = None,
 ) -> pd.DataFrame:
     """Add a rule-based recommendation score to each drink."""
     scored_drinks = drinks.copy()
-    scored_drinks["recommendation_score"] = 0
-    scored_drinks["recommendation_explanation"] = ""
+    details = scored_drinks.apply(
+        lambda drink: _calculate_context_score_details(drink, context),
+        axis=1,
+    )
+    scored_drinks["context_score"] = details.apply(lambda detail: detail[0]).astype(int)
+    scored_drinks["recommendation_explanation"] = details.apply(
+        lambda detail: "; ".join(detail[1])
+    )
+    scored_drinks["profile_score"] = 0
+    scored_drinks["ingredient_preference_score"] = 0
+    scored_drinks["past_rating_score"] = 0
+    scored_drinks["fallback_similarity_score"] = 0
+    scored_drinks["recommendation_score"] = scored_drinks["context_score"]
 
     if user:
         favorite_milk = str(user.get("favorite_milk", "")).lower()
@@ -149,29 +361,42 @@ def add_recommendation_scores(
             scored_drinks["milk"].apply(_clean_value) == favorite_milk,
             PROFILE_SCORE_WEIGHTS["milk"],
             f"+{PROFILE_SCORE_WEIGHTS['milk']} favorite milk",
+            "profile_score",
         )
         _add_reason(
             scored_drinks,
             scored_drinks["temperature"].apply(_clean_value) == favorite_temperature,
             PROFILE_SCORE_WEIGHTS["temperature"],
             f"+{PROFILE_SCORE_WEIGHTS['temperature']} favorite temperature",
+            "profile_score",
         )
         _add_reason(
             scored_drinks,
             scored_drinks["caffeine_level"].apply(_clean_value) == caffeine_tolerance,
             PROFILE_SCORE_WEIGHTS["caffeine"],
             f"+{PROFILE_SCORE_WEIGHTS['caffeine']} caffeine tolerance",
+            "profile_score",
         )
         _add_reason(
             scored_drinks,
             scored_drinks["sweetness_level"].apply(_clean_value) == preferred_sweetness,
             PROFILE_SCORE_WEIGHTS["sweetness"],
             f"+{PROFILE_SCORE_WEIGHTS['sweetness']} preferred sweetness",
+            "profile_score",
         )
 
     if user_history is not None and not user_history.empty:
         history = user_history.copy()
-        history["rating_points"] = history["rating"].astype(int) * RATING_MULTIPLIER
+        ratings = history["rating"].astype(int)
+        history["rating_points"] = ratings.apply(
+            lambda rating: (
+                rating * RATING_MULTIPLIER
+                if rating >= 4
+                else -(3 - rating) * RATING_MULTIPLIER
+                if rating <= 2
+                else 0
+            )
+        )
         history["order_again_points"] = history["would_order_again"].apply(_is_true).astype(int)
         history["order_again_points"] *= ORDER_AGAIN_BONUS
         history["history_score"] = history["rating_points"] + history["order_again_points"]
@@ -180,7 +405,7 @@ def add_recommendation_scores(
         for drink_id, drink_history in history.groupby("drink_id"):
             rating_points = int(drink_history["rating_points"].sum())
             order_again_points = int(drink_history["order_again_points"].sum())
-            reasons = [f"+{rating_points} past rating points"]
+            reasons = [f"{rating_points:+d} past rating points"] if rating_points else []
             if order_again_points:
                 reasons.append(f"+{order_again_points} would order again")
             history_reasons[drink_id] = "; ".join(reasons)
@@ -188,7 +413,12 @@ def add_recommendation_scores(
         scored_drinks["recommendation_score"] += (
             scored_drinks["drink_id"].map(history_scores).fillna(0).astype(int)
         )
+        scored_drinks["past_rating_score"] += (
+            scored_drinks["drink_id"].map(history_scores).fillna(0).astype(int)
+        )
         for drink_id, reason in history_reasons.items():
+            if not reason:
+                continue
             mask = scored_drinks["drink_id"] == drink_id
             scored_drinks.loc[mask, "recommendation_explanation"] = scored_drinks.loc[
                 mask,
@@ -224,6 +454,9 @@ def add_recommendation_scores(
             scored_drinks["recommendation_score"] += (
                 scored_drinks["drink_id"].map(drink_scores).fillna(0).round().astype(int)
             )
+            scored_drinks["ingredient_preference_score"] += (
+                scored_drinks["drink_id"].map(drink_scores).fillna(0).round().astype(int)
+            )
 
             for drink_id, ingredient_score in drink_scores.items():
                 score = int(round(ingredient_score))
@@ -244,6 +477,9 @@ def add_recommendation_scores(
         scored_drinks["recommendation_explanation"] == "",
         "recommendation_explanation",
     ] = "No profile or history match yet"
+    scored_drinks["recommendation_summary"] = scored_drinks[
+        "recommendation_explanation"
+    ].apply(_short_reason)
 
     return scored_drinks.sort_values(
         by=["recommendation_score", "price"],
@@ -263,6 +499,7 @@ def recommend_drinks(
     user_history: pd.DataFrame | None = None,
     ingredient_preferences: pd.DataFrame | None = None,
     drink_recipes: pd.DataFrame | None = None,
+    context: dict[str, object] | None = None,
 ) -> pd.DataFrame:
     """Apply filters, score drinks, and return ranked matches."""
     matches = filter_by_caffeine(drinks, caffeine_level)
@@ -277,6 +514,7 @@ def recommend_drinks(
         user_history=user_history,
         ingredient_preferences=ingredient_preferences,
         drink_recipes=drink_recipes,
+        context=context,
     )
 
 
@@ -389,6 +627,7 @@ def recommend_with_fallback(
     user_history: pd.DataFrame | None = None,
     ingredient_preferences: pd.DataFrame | None = None,
     drink_recipes: pd.DataFrame | None = None,
+    context: dict[str, object] | None = None,
 ) -> tuple[pd.DataFrame, bool, list[str]]:
     """Recommend exact matches first, then closest matches if exact matches are empty."""
     exact_matches = recommend_drinks(
@@ -403,6 +642,7 @@ def recommend_with_fallback(
         user_history=user_history,
         ingredient_preferences=ingredient_preferences,
         drink_recipes=drink_recipes,
+        context=context,
     )
     if not exact_matches.empty:
         return exact_matches, True, []
@@ -421,6 +661,7 @@ def recommend_with_fallback(
         user_history=user_history,
         ingredient_preferences=ingredient_preferences,
         drink_recipes=drink_recipes,
+        context=context,
     )
     fallback["close_match_score"] = 0
 
@@ -453,10 +694,14 @@ def recommend_with_fallback(
             "budget"
         ]
 
-    fallback["recommendation_score"] += fallback["close_match_score"]
-    fallback["recommendation_explanation"] = fallback.apply(
-        lambda row: _close_match_explanation(row, filters),
-        axis=1,
+    fallback["fallback_similarity_score"] = fallback["close_match_score"]
+    fallback["recommendation_score"] += fallback["fallback_similarity_score"]
+    close_reasons = fallback.apply(lambda row: _close_match_explanation(row, filters), axis=1)
+    fallback["recommendation_explanation"] = fallback[
+        "recommendation_explanation"
+    ].astype(str) + "; " + close_reasons
+    fallback["recommendation_summary"] = fallback["recommendation_explanation"].apply(
+        _short_reason
     )
     fallback = fallback.sort_values(
         by=["recommendation_score", "close_match_score", "price"],
