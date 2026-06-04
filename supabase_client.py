@@ -70,9 +70,26 @@ def upsert_row(
             "to Streamlit secrets or local environment variables."
         )
 
-    response = client.table(table_name).upsert(row, on_conflict=on_conflict).execute()
-    if response.data:
-        return response.data[0]
+    conflict_targets = [on_conflict]
+    if table_name == "ingredient_preferences" and on_conflict == "user_id,ingredient_id":
+        conflict_targets.append("unique_user_ingredient")
+
+    last_error = None
+    for conflict_target in conflict_targets:
+        try:
+            response = (
+                client.table(table_name)
+                .upsert(row, on_conflict=conflict_target)
+                .execute()
+            )
+            if response.data:
+                return response.data[0]
+            return row
+        except Exception as error:
+            last_error = error
+
+    if last_error is not None:
+        raise last_error
     return row
 
 

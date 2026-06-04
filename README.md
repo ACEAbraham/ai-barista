@@ -330,6 +330,11 @@ decrease them, and a rating of 3 leaves them unchanged. Recommendations load the
 current user's latest scores from Supabase, adding points for liked ingredients
 and subtracting points for disliked ingredients without retraining a model.
 
+Ingredient preference upserts first use the `user_id,ingredient_id` conflict
+columns and fall back to the `unique_user_ingredient` constraint. Preference
+learning is best-effort: if it fails, AI Barista logs a warning but still saves
+the rating and continues the user flow.
+
 If exact filters return no drinks, AI Barista now falls back to close matches. Close matches are ranked by `recommendation_score` plus similarity to selected milk, temperature, caffeine, sweetness, dietary tag, and budget preferences. The app shows which filters were relaxed.
 
 ## Example Preferences

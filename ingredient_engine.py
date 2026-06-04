@@ -1,5 +1,6 @@
 """Ingredient-based drink building for AI Barista."""
 
+import logging
 from pathlib import Path
 import re
 
@@ -63,6 +64,7 @@ FLAVOR_WEIGHTS = {
     "topping": 1,
     "temperature": 1,
 }
+LOGGER = logging.getLogger(__name__)
 
 
 def load_ingredients() -> pd.DataFrame:
@@ -203,7 +205,7 @@ def _rating_adjustment(rating: int) -> int:
 
 
 def update_ingredient_preferences(user_id: str, drink_id: str, rating: int) -> pd.DataFrame:
-    """Immediately update a user's Supabase ingredient scores from a rating."""
+    """Best-effort update of a user's Supabase ingredient scores from a rating."""
     adjustment = _rating_adjustment(rating)
     if adjustment == 0:
         return get_ingredient_preferences(user_id)
@@ -219,21 +221,42 @@ def update_ingredient_preferences(user_id: str, drink_id: str, rating: int) -> p
         if not preferences.empty
         else {}
     )
+    ingredients = load_ingredients()
+    ingredient_names = (
+        ingredients.set_index("ingredient_id")["ingredient_name"].astype(str).to_dict()
+    )
     ingredient_quantities = drink_recipe.groupby("ingredient_id")["quantity"].sum()
 
     for ingredient_id, quantity in ingredient_quantities.items():
         score = current_scores.get(ingredient_id, 0.0) + adjustment * float(quantity)
-        upsert_row(
-            "ingredient_preferences",
-            {
-                "user_id": user_id,
-                "ingredient_id": ingredient_id,
-                "preference_score": score,
-            },
-            on_conflict="user_id,ingredient_id",
-        )
+        try:
+            upsert_row(
+                "ingredient_preferences",
+                {
+                    "user_id": user_id,
+                    "ingredient_id": ingredient_id,
+                    "ingredient_name": ingredient_names.get(ingredient_id, str(ingredient_id)),
+                    "preference_score": score,
+                },
+                on_conflict="user_id,ingredient_id",
+            )
+        except Exception as error:
+            LOGGER.warning(
+                "Ingredient preference learning failed for user %s, ingredient %s: %s",
+                user_id,
+                ingredient_id,
+                error,
+            )
 
-    return get_ingredient_preferences(user_id)
+    try:
+        return get_ingredient_preferences(user_id)
+    except Exception as error:
+        LOGGER.warning(
+            "Could not reload ingredient preferences for user %s: %s",
+            user_id,
+            error,
+        )
+        return preferences
 
 
 def get_taste_profile(user_id: str) -> dict[str, pd.DataFrame]:

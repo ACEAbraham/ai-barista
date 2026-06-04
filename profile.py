@@ -1,5 +1,7 @@
 """User profile and rating storage for AI Barista."""
 
+import logging
+
 import pandas as pd
 
 from supabase_client import insert_row, table_to_dataframe
@@ -13,6 +15,7 @@ USER_COLUMNS = [
     "preferred_sweetness",
 ]
 RATING_COLUMNS = ["user_id", "drink_id", "rating", "would_order_again"]
+LOGGER = logging.getLogger(__name__)
 
 
 def load_users() -> pd.DataFrame:
@@ -99,7 +102,14 @@ def save_rating(
     # Import here to keep profile storage independent during module loading.
     from ingredient_engine import update_ingredient_preferences
 
-    update_ingredient_preferences(user_id, drink_id, rating)
+    try:
+        update_ingredient_preferences(user_id, drink_id, rating)
+    except Exception as error:
+        LOGGER.warning(
+            "Rating saved, but ingredient preference learning failed for user %s: %s",
+            user_id,
+            error,
+        )
     return saved_rating
 
 
