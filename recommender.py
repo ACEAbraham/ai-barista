@@ -91,6 +91,41 @@ def filter_by_dietary_tag(drinks: pd.DataFrame, dietary_tag: str | None) -> pd.D
     return drinks[drinks["dietary_tags"].apply(_clean_value).str.contains(tag, na=False)]
 
 
+def find_similar_drinks(
+    drinks: pd.DataFrame,
+    drink: dict[str, object] | pd.Series,
+    limit: int = 3,
+) -> pd.DataFrame:
+    """Find similar drinks using the existing catalog attributes."""
+    candidates = drinks.copy()
+    drink_id = str(drink.get("drink_id", ""))
+    if drink_id and "drink_id" in candidates.columns:
+        candidates = candidates[candidates["drink_id"].astype(str) != drink_id]
+
+    candidates["similarity_score"] = 0
+    weights = {
+        "base": 3,
+        "milk": 2,
+        "temperature": 2,
+        "caffeine_level": 2,
+        "sweetness_level": 1,
+    }
+    for column, weight in weights.items():
+        if column not in candidates.columns:
+            continue
+        selected = _clean_value(drink.get(column, ""))
+        if selected:
+            candidates.loc[
+                candidates[column].apply(_clean_value) == selected,
+                "similarity_score",
+            ] += weight
+
+    return candidates.sort_values(
+        by=["similarity_score", "price"],
+        ascending=[False, True],
+    ).head(limit)
+
+
 def add_recommendation_scores(
     drinks: pd.DataFrame,
     user: dict[str, str] | None = None,

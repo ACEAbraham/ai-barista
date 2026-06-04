@@ -8,6 +8,7 @@ import streamlit as st
 
 from customization import log_session
 from drink_database import list_options, load_drinks
+from drink_images import get_drink_image
 from ingredient_engine import (
     SUPPORTED_CATEGORIES,
     SUPPORTED_UNITS,
@@ -21,9 +22,9 @@ from ingredient_engine import (
     save_custom_drink_recipe,
 )
 from openai_client import generate_drink_recommendation, openai_is_configured
-from profile import create_user, get_user_history, load_user, save_rating
+from profile import create_user, get_user_history, load_ratings, load_user, save_rating
 from profile import load_users as load_supabase_users
-from recommender import recommend_with_fallback
+from recommender import find_similar_drinks, recommend_with_fallback
 from supabase_client import insert_row, supabase_is_configured, update_rows
 
 
@@ -204,6 +205,21 @@ def apply_theme() -> None:
             padding: 0.75rem 0.85rem;
             font-size: 0.92rem;
         }
+
+        [data-testid="stImage"] img {
+            border-radius: 12px;
+            border: 1px solid var(--ai-accent);
+            object-fit: cover;
+        }
+
+        .profile-status {
+            background: var(--ai-input);
+            border: 1px solid var(--ai-accent);
+            border-radius: 12px;
+            padding: 0.7rem 0.9rem;
+            margin-bottom: 1rem;
+            color: var(--ai-text);
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -233,6 +249,12 @@ def initialize_state() -> None:
         st.session_state.ai_recommendation_context = None
     if "ai_recommendation_id" not in st.session_state:
         st.session_state.ai_recommendation_id = None
+    if "home_view" not in st.session_state:
+        st.session_state.home_view = "recommend"
+    if "selected_drink_id" not in st.session_state:
+        st.session_state.selected_drink_id = None
+    if "consumer_matches" not in st.session_state:
+        st.session_state.consumer_matches = None
 
 
 def save_warning() -> None:
@@ -323,6 +345,262 @@ def render_recommendation_cards(matches: pd.DataFrame, limit: int = 10) -> None:
             """,
             unsafe_allow_html=True,
         )
+
+
+def _match_percentage(score: object) -> int:
+    """Convert an open-ended recommendation score into a friendly percentage."""
+    try:
+        return max(55, min(99, 70 + int(float(score)) * 2))
+    except (TypeError, ValueError):
+        return 70
+
+
+def _drink_description(drink: dict[str, object] | pd.Series) -> str:
+    """Return a short consumer-friendly drink description."""
+    profile = str(drink.get("flavor_profile", "")).strip()
+    if profile and profile.lower() != "nan":
+        return profile.capitalize()
+    return (
+        f"A {str(drink.get('temperature', '')).lower()} "
+        f"{str(drink.get('base', 'beverage')).lower()} made with "
+        f"{str(drink.get('milk', 'your preferred')).lower()} milk."
+    )
+
+
+def render_consumer_cards(matches: pd.DataFrame, limit: int = 3) -> None:
+    """Render photo-backed recommendation cards with detail actions."""
+    rows = list(matches.head(limit).iterrows())
+    columns = st.columns(len(rows)) if rows else []
+    for column, (_, drink) in zip(columns, rows):
+        with column:
+            with st.container(border=True):
+                st.image(
+                    get_drink_image(drink.to_dict()),
+                    width="stretch",
+                )
+                st.markdown(f"### {drink.get('drink_name', 'Recommended drink')}")
+                st.markdown(
+                    f"**{_match_percentage(drink.get('recommendation_score'))}% match**"
+                )
+                st.caption(_drink_description(drink))
+                st.write(
+                    f"{drink.get('caffeine_level', 'unknown')} caffeine · "
+                    f"{drink.get('sweetness_level', 'unknown')} sweetness · "
+                    f"{drink.get('calories', 'N/A')} cal"
+                )
+                if st.button(
+                    "View Details",
+                    key=f"details_{drink.get('drink_id')}",
+                    use_container_width=True,
+                ):
+                    st.session_state.selected_drink_id = drink.get("drink_id")
+                    st.session_state.home_view = "details"
+                    st.rerun()
+
+
+def _save_favorite(user_id: str, drink_id: str) -> tuple[bool, str]:
+    """Save a favorite, returning a friendly fallback if unavailable."""
+    try:
+        insert_row(
+            "favorites",
+            {
+                "user_id": user_id,
+                "drink_id": drink_id,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+    except Exception:
+        return False, "Favorites are not available yet, but this drink will stay in your recent recommendations."
+    return True, "Saved to favorites."
+
+
+def drink_detail_section() -> None:
+    """Render a detailed drink view with favorites, ratings, and similar drinks."""
+    drink_id = st.session_state.selected_drink_id
+    drinks = st.session_state.drinks
+    matches = drinks[drinks["drink_id"].astype(str) == str(drink_id)]
+    if matches.empty:
+        st.warning("That drink is no longer available.")
+        return
+
+    drink = matches.iloc[0]
+    scored = st.session_state.consumer_matches
+    if scored is not None and "drink_id" in scored.columns:
+        scored_match = scored[scored["drink_id"].astype(str) == str(drink_id)]
+        if not scored_match.empty:
+            drink = scored_match.iloc[0]
+
+    if st.button("Back to recommendations"):
+        st.session_state.home_view = "recommend"
+        st.rerun()
+
+    col1, col2 = st.columns([1, 1.25])
+    with col1:
+        st.image(get_drink_image(drink.to_dict()), width="stretch")
+    with col2:
+        st.header(str(drink.get("drink_name", "Drink details")))
+        st.markdown(f"**{_match_percentage(drink.get('recommendation_score'))}% match**")
+        st.write(_drink_description(drink))
+        st.info(
+            str(
+                drink.get(
+                    "recommendation_explanation",
+                    "Recommended from your taste profile and selected preferences.",
+                )
+            )
+        )
+        st.write(f"**Ingredients:** {drink.get('flavor_profile', 'Not available')}")
+        st.write(
+            f"**Caffeine:** {drink.get('caffeine_level', 'unknown')}  \n"
+            f"**Calories:** {drink.get('calories', 'N/A')}  \n"
+            f"**Sweetness:** {drink.get('sweetness_level', 'unknown')}  \n"
+            f"**Dietary tags:** {drink.get('dietary_tags', 'none listed')}"
+        )
+
+        user = st.session_state.current_user
+        if st.button("Save to Favorites", use_container_width=True):
+            if not user:
+                st.info("Load or create a profile to save favorites.")
+            else:
+                saved, message = _save_favorite(user["user_id"], str(drink_id))
+                (st.success if saved else st.info)(message)
+
+    ratings = load_ratings()
+    drink_ratings = (
+        ratings[ratings["drink_id"].astype(str) == str(drink_id)]
+        if not ratings.empty
+        else ratings
+    )
+    if not drink_ratings.empty:
+        st.caption(
+            f"User rating: {drink_ratings['rating'].astype(float).mean():.1f}/5 "
+            f"from {len(drink_ratings)} rating(s)"
+        )
+
+    st.subheader("Rate this drink")
+    user = st.session_state.current_user
+    if not user:
+        st.info("Load or create a profile to rate this drink.")
+    else:
+        with st.form(f"detail_rating_{drink_id}"):
+            rating = st.slider("Rating", 1, 5, 4, key=f"detail_rating_value_{drink_id}")
+            would_order_again = st.radio(
+                "Would order again?",
+                ["Yes", "No"],
+                horizontal=True,
+                key=f"detail_order_again_{drink_id}",
+            )
+            feedback_text = st.text_area(
+                "Optional feedback",
+                key=f"detail_feedback_{drink_id}",
+            )
+            submitted = st.form_submit_button("Save rating")
+        if submitted:
+            try:
+                save_rating(user["user_id"], str(drink_id), rating, would_order_again == "Yes")
+                log_session(
+                    user_id=user["user_id"],
+                    sleep_hours="",
+                    stress_level="",
+                    goal="drink detail rating",
+                    weather="",
+                    drink_id=str(drink_id),
+                    rating=rating,
+                )
+                if feedback_text.strip():
+                    try:
+                        insert_row(
+                            "drink_feedback",
+                            {
+                                "user_id": user["user_id"],
+                                "drink_id": str(drink_id),
+                                "feedback_text": feedback_text.strip(),
+                                "created_at": datetime.now(timezone.utc).isoformat(),
+                            },
+                        )
+                    except Exception:
+                        st.info("Your rating was saved. Text feedback storage is not available yet.")
+                st.success("Rating saved.")
+            except RuntimeError as error:
+                st.error(str(error))
+
+    st.subheader("Similar drinks")
+    similar = find_similar_drinks(drinks, drink, limit=3)
+    render_consumer_cards(similar, limit=3)
+
+
+def consumer_recommendation_section() -> None:
+    """Render the profile-aware consumer recommendation flow."""
+    user = st.session_state.current_user
+    st.subheader("Get Recommendation")
+    st.caption(
+        "Your taste profile shapes every result."
+        if user
+        else "Create or load a profile for personalized results."
+    )
+
+    with st.form("consumer_recommendation_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            goal = st.selectbox("Goal", ["Energy", "Focus", "Comfort", "Workout", "Treat"])
+        with col2:
+            temperature = st.selectbox(
+                "Temperature preference",
+                ["No Preference", "Iced", "Hot"],
+            )
+        with st.expander("Optional refinement", expanded=False):
+            milk = st.selectbox(
+                "Milk",
+                ["Any", "whole", "2%", "oat", "almond", "soy", "coconut", "none"],
+            )
+            caffeine = st.selectbox("Caffeine", ["Any", "none", "low", "medium", "high"])
+            sweetness = st.selectbox(
+                "Sweetness",
+                ["Any", "unsweetened", "light", "classic", "extra"],
+            )
+            likes = st.text_input("Likes")
+            dislikes = st.text_input("Dislikes")
+        submitted = st.form_submit_button(
+            "Get Recommendation",
+            type="primary",
+            use_container_width=True,
+        )
+
+    if submitted:
+        matches, _, _ = recommend_with_fallback(
+            drinks=st.session_state.drinks,
+            temperature=None if temperature == "No Preference" else temperature.lower(),
+            milk=None if milk == "Any" else milk,
+            caffeine_level=None if caffeine == "Any" else caffeine,
+            sweetness_level=None if sweetness == "Any" else sweetness,
+            user=user,
+            user_history=get_user_history(user["user_id"]) if user else None,
+            ingredient_preferences=get_ingredient_preferences(user["user_id"]) if user else None,
+            drink_recipes=load_recipes(),
+        )
+        query = f"{likes} {dislikes}".strip().lower()
+        if query:
+            matches["recommendation_explanation"] = matches[
+                "recommendation_explanation"
+            ].astype(str) + f"; considered your notes: {query}"
+        st.session_state.consumer_matches = matches
+        if not matches.empty and supabase_is_configured():
+            try:
+                log_session(
+                    user_id=user["user_id"] if user else "guest",
+                    sleep_hours="",
+                    stress_level="",
+                    goal=goal.lower(),
+                    weather="",
+                    drink_id=str(matches.iloc[0]["drink_id"]),
+                    rating="",
+                )
+            except RuntimeError as error:
+                st.error(str(error))
+
+    matches = st.session_state.consumer_matches
+    if matches is not None and not matches.empty:
+        render_consumer_cards(matches, limit=3)
 
 
 def render_ai_recommendation(recommendation: dict[str, object]) -> None:
@@ -924,8 +1202,8 @@ def main() -> None:
     st.markdown(
         """
         <section class="ai-title-section">
-            <h1>AI Barista</h1>
-            <p>A quick drink recommendation for how today feels.</p>
+            <h1>☕ AI Barista</h1>
+            <p>Personalized recommendations powered by your taste profile.</p>
         </section>
         """,
         unsafe_allow_html=True,
@@ -936,45 +1214,83 @@ def main() -> None:
             "but recommendations and feedback require SUPABASE_URL and SUPABASE_KEY."
         )
 
-    ai_recommendation_section()
+    st.markdown(
+        f'<div class="profile-status"><strong>Taste profile:</strong> {safe_text(current_user_label())}</div>',
+        unsafe_allow_html=True,
+    )
+
+    action1, action2, action3 = st.columns(3)
+    with action1:
+        if st.button("Create Profile", key="home_create_profile", use_container_width=True):
+            st.session_state.home_view = "create_profile"
+            st.session_state.selected_drink_id = None
+            st.rerun()
+    with action2:
+        if st.button("Load Profile", key="home_load_profile", use_container_width=True):
+            st.session_state.home_view = "load_profile"
+            st.session_state.selected_drink_id = None
+            st.rerun()
+    with action3:
+        if st.button(
+            "Get Recommendation",
+            key="home_get_recommendation",
+            type="primary",
+            use_container_width=True,
+        ):
+            st.session_state.home_view = "recommend"
+            st.session_state.selected_drink_id = None
+            st.rerun()
+
+    view = st.session_state.home_view
+    if view == "create_profile":
+        create_profile_section()
+        if st.session_state.current_user:
+            with st.expander("Your taste profile", expanded=False):
+                taste_profile_section()
+    elif view == "load_profile":
+        load_profile_section()
+        if st.session_state.current_user:
+            with st.expander("Rating history", expanded=False):
+                rating_history_section()
+    elif view == "details":
+        drink_detail_section()
+    else:
+        consumer_recommendation_section()
 
     with st.expander("Advanced Tools", expanded=False):
         advanced = st.tabs(
             [
-                "Create Profile",
                 "Create Custom Drink",
                 "Add Ingredient",
                 "Ingredient List",
-                "More",
+                "Admin / Debug",
             ]
         )
         with advanced[0]:
-            create_profile_section()
-        with advanced[1]:
             custom_drink_section()
-        with advanced[2]:
+        with advanced[1]:
             add_ingredient_section()
-        with advanced[3]:
+        with advanced[2]:
             ingredient_list_section()
-        with advanced[4]:
-            more_tabs = st.tabs(
+        with advanced[3]:
+            admin_tabs = st.tabs(
                 [
+                    "OpenAI beta",
                     "Rule-based recommendations",
-                    "Load profile",
                     "Rate drink",
                     "Rating history",
                     "Taste profile",
                 ]
             )
-            with more_tabs[0]:
+            with admin_tabs[0]:
+                ai_recommendation_section()
+            with admin_tabs[1]:
                 recommendation_section()
-            with more_tabs[1]:
-                load_profile_section()
-            with more_tabs[2]:
+            with admin_tabs[2]:
                 rate_drink_section()
-            with more_tabs[3]:
+            with admin_tabs[3]:
                 rating_history_section()
-            with more_tabs[4]:
+            with admin_tabs[4]:
                 taste_profile_section()
 
 
