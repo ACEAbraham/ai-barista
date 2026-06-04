@@ -1,10 +1,16 @@
-"""OpenAI-powered beverage recommendation helpers."""
+"""OpenAI reasoning over AI Barista's Supabase-backed user memory."""
 
 import json
 from os import getenv
 
+import pandas as pd
 import streamlit as st
 from openai import OpenAI
+
+from favorites import get_user_favorites
+from ingredient_engine import get_ingredient_preferences, load_ingredients
+from profile import get_user_history, load_user
+from supabase_client import get_supabase
 
 
 DEFAULT_MODEL = "gpt-5.4-mini"
@@ -12,35 +18,32 @@ RECOMMENDATION_SCHEMA = {
     "type": "object",
     "properties": {
         "drink_name": {"type": "string"},
-        "size": {"type": "string"},
+        "base": {"type": "string"},
         "temperature": {"type": "string"},
+        "size": {"type": "string"},
         "milk": {"type": "string"},
         "syrup": {"type": "string"},
         "sweetness_level": {"type": "string"},
         "espresso_shots": {"type": "integer", "minimum": 0},
-        "caffeine_level": {
-            "type": "string",
-            "enum": ["none", "low", "medium", "high"],
-        },
-        "ingredients": {
-            "type": "array",
-            "items": {"type": "string"},
-            "minItems": 1,
-        },
-        "explanation": {"type": "string"},
-        "confidence_score": {"type": "integer", "minimum": 0, "maximum": 100},
+        "caffeine_level": {"type": "string"},
+        "ingredients": {"type": "array", "items": {"type": "string"}},
+        "why_recommended": {"type": "string"},
+        "memory_used": {"type": "array", "items": {"type": "string"}},
+        "confidence_score": {"type": "number", "minimum": 0, "maximum": 1},
     },
     "required": [
         "drink_name",
-        "size",
+        "base",
         "temperature",
+        "size",
         "milk",
         "syrup",
         "sweetness_level",
         "espresso_shots",
         "caffeine_level",
         "ingredients",
-        "explanation",
+        "why_recommended",
+        "memory_used",
         "confidence_score",
     ],
     "additionalProperties": False,
@@ -67,21 +70,160 @@ def get_openai() -> OpenAI:
     """Create an authenticated OpenAI client."""
     api_key = _secret_value("OPENAI_API_KEY")
     if not api_key:
-        raise RuntimeError(
-            "OpenAI is not configured. Add OPENAI_API_KEY to Streamlit secrets "
-            "or local environment variables."
-        )
+        raise RuntimeError("AI recommendations are not configured yet.")
     return OpenAI(api_key=api_key)
 
 
-def generate_drink_recommendation(context: dict[str, object]) -> dict[str, object]:
-    """Generate exactly one structured beverage recommendation."""
+def _safe_recent_rows(
+    table_name: str,
+    user_id: str,
+    limit: int = 5,
+    order_column: str = "created_at",
+) -> list[dict[str, object]]:
+    """Load recent user rows without making optional memory tables fatal."""
+    client = get_supabase()
+    if client is None:
+        return []
+    try:
+        response = (
+            client.table(table_name)
+            .select("*")
+            .eq("user_id", user_id)
+            .order(order_column, desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return response.data or []
+    except Exception:
+        try:
+            response = client.table(table_name).select("*").eq("user_id", user_id).limit(limit).execute()
+            return response.data or []
+        except Exception:
+            return []
+
+
+def _drink_names_by_id() -> dict[str, str]:
+    """Return drink names for rating-history summaries."""
+    from drink_database import load_drinks
+
+    drinks = load_drinks()
+    return drinks.set_index(drinks["drink_id"].astype(str))["drink_name"].astype(str).to_dict()
+
+
+def build_user_memory_summary(user_id: str) -> str:
+    """Build a concise Supabase memory summary for OpenAI reasoning."""
+    user = load_user(user_id) or {}
+    preferences = get_ingredient_preferences(user_id)
+    ratings = get_user_history(user_id)
+    try:
+        favorites = get_user_favorites(user_id)
+    except Exception:
+        favorites = pd.DataFrame()
+    recent_sessions = _safe_recent_rows("sessions", user_id, 5, order_column="timestamp")
+    custom_drinks = _safe_recent_rows("custom_drinks", user_id, 5)
+    drink_names = _drink_names_by_id()
+    ingredient_names = load_ingredients().set_index("ingredient_id")["ingredient_name"].to_dict()
+
+    liked: list[str] = []
+    disliked: list[str] = []
+    if not preferences.empty:
+        scored = preferences.copy()
+        scored["preference_score"] = pd.to_numeric(scored["preference_score"], errors="coerce").fillna(0)
+        scored["ingredient_name"] = scored.apply(
+            lambda row: row.get("ingredient_name")
+            or ingredient_names.get(row.get("ingredient_id"), row.get("ingredient_id")),
+            axis=1,
+        )
+        liked = [
+            f"{row.ingredient_name} {row.preference_score:+g}"
+            for row in scored[scored["preference_score"] > 0]
+            .sort_values("preference_score", ascending=False)
+            .head(5)
+            .itertuples()
+        ]
+        disliked = [
+            f"{row.ingredient_name} {row.preference_score:+g}"
+            for row in scored[scored["preference_score"] < 0]
+            .sort_values("preference_score")
+            .head(5)
+            .itertuples()
+        ]
+
+    high_ratings: list[str] = []
+    low_ratings: list[str] = []
+    if not ratings.empty:
+        recent = ratings.tail(5).copy()
+        recent["rating"] = pd.to_numeric(recent["rating"], errors="coerce").fillna(0)
+        for row in recent.itertuples():
+            item = f"{drink_names.get(str(row.drink_id), row.drink_id)}: {int(row.rating)}/5"
+            (high_ratings if row.rating >= 4 else low_ratings if row.rating <= 2 else []).append(item)
+
+    favorite_names = (
+        favorites["drink_name"].dropna().astype(str).head(5).tolist()
+        if not favorites.empty and "drink_name" in favorites
+        else []
+    )
+    session_notes = [
+        ", ".join(
+            f"{key}={row.get(key)}"
+            for key in ("goal", "weather", "stress_level", "drink_id")
+            if row.get(key) not in {None, ""}
+        )
+        for row in recent_sessions
+    ]
+    custom_names = [str(row.get("drink_name")) for row in custom_drinks if row.get("drink_name")]
+
+    def line(label: str, values: list[str]) -> str:
+        return f"{label}: {', '.join(values) if values else 'none yet'}"
+
+    return "\n".join(
+        [
+            "Profile:",
+            f"- favorite milk: {user.get('favorite_milk', 'not specified')}",
+            f"- caffeine tolerance: {user.get('caffeine_tolerance', 'not specified')}",
+            f"- sweetness preference: {user.get('preferred_sweetness', 'not specified')}",
+            line("Liked ingredients", liked),
+            line("Disliked ingredients", disliked),
+            line("Recent high-rated drinks", high_ratings),
+            line("Recent low-rated drinks", low_ratings),
+            line("Favorites", favorite_names),
+            line("Recent sessions", session_notes),
+            line("Relevant custom drinks", custom_names),
+        ]
+    )
+
+
+def _available_options(available_drinks: pd.DataFrame) -> str:
+    """Create a bounded list of current drinks and ingredients for the prompt."""
+    drink_lines = []
+    for drink in available_drinks.head(15).itertuples():
+        drink_lines.append(
+            f"{drink.drink_name} | base={drink.base} | temp={drink.temperature} | "
+            f"milk={drink.milk} | caffeine={drink.caffeine_level} | "
+            f"sweetness={drink.sweetness_level}"
+        )
+    ingredient_names = load_ingredients()["ingredient_name"].dropna().astype(str).head(5).tolist()
+    return "Available drinks:\n- " + "\n- ".join(drink_lines) + (
+        "\nAvailable ingredients:\n- " + ", ".join(ingredient_names)
+    )
+
+
+def generate_ai_recommendation(
+    user_id: str,
+    current_context: dict[str, object],
+    available_drinks: pd.DataFrame,
+) -> dict[str, object]:
+    """Use OpenAI to reason over Supabase memory and current context."""
+    memory_summary = build_user_memory_summary(user_id)
     prompt = (
-        "You are AI Barista. Recommend exactly one practical coffee-shop beverage "
-        "that fits the user's context and preferences. Respect dietary restrictions "
-        "and explicit dislikes. Use common ingredients and make the explanation brief, "
-        "specific, and friendly. User context:\n"
-        f"{json.dumps(context, ensure_ascii=True)}"
+        "You are AI Barista. Recommend exactly one drink using the user's durable "
+        "Supabase memory and today's context. Prefer a drink in the available dataset. "
+        "If you create a custom drink, use only listed ingredients. Avoid disliked "
+        "ingredients and respect dietary restrictions. Be clear and friendly, and do "
+        "not claim scientific certainty. Return structured JSON only.\n\n"
+        f"USER MEMORY\n{memory_summary}\n\n"
+        f"CURRENT CONTEXT\n{json.dumps(current_context, ensure_ascii=True)}\n\n"
+        f"{_available_options(available_drinks)}"
     )
     response = get_openai().responses.create(
         model=_secret_value("OPENAI_MODEL") or DEFAULT_MODEL,
@@ -90,10 +232,21 @@ def generate_drink_recommendation(context: dict[str, object]) -> dict[str, objec
         text={
             "format": {
                 "type": "json_schema",
-                "name": "drink_recommendation",
+                "name": "ai_barista_recommendation",
                 "strict": True,
                 "schema": RECOMMENDATION_SCHEMA,
             }
         },
     )
     return json.loads(response.output_text)
+
+
+def generate_drink_recommendation(context: dict[str, object]) -> dict[str, object]:
+    """Backward-compatible wrapper for older callers."""
+    from drink_database import load_drinks
+
+    return generate_ai_recommendation(
+        str(context.get("user_id", "guest")),
+        context,
+        load_drinks(),
+    )

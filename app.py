@@ -22,7 +22,11 @@ from ingredient_engine import (
     load_recipes,
     save_custom_drink_recipe,
 )
-from openai_client import generate_drink_recommendation, openai_is_configured
+from openai_client import (
+    build_user_memory_summary,
+    generate_ai_recommendation,
+    openai_is_configured,
+)
 from profile import (
     create_user,
     get_user_history,
@@ -368,6 +372,10 @@ def initialize_state() -> None:
         st.session_state.ai_recommendation_context = None
     if "ai_recommendation_id" not in st.session_state:
         st.session_state.ai_recommendation_id = None
+    if "ai_memory_summary" not in st.session_state:
+        st.session_state.ai_memory_summary = None
+    if "ai_fallback_matches" not in st.session_state:
+        st.session_state.ai_fallback_matches = None
     if "home_view" not in st.session_state:
         st.session_state.home_view = "recommend"
     if "selected_drink_id" not in st.session_state:
@@ -880,21 +888,29 @@ def consumer_recommendation_section() -> None:
 
 
 def render_ai_recommendation(recommendation: dict[str, object]) -> None:
-    """Render one OpenAI drink recommendation."""
+    """Render one memory-informed OpenAI drink recommendation."""
     ingredients = ", ".join(
         safe_text(item) for item in recommendation.get("ingredients", [])
     )
+    memory_used = ", ".join(
+        safe_text(item) for item in recommendation.get("memory_used", [])
+    )
+    confidence = float(recommendation.get("confidence_score", 0) or 0)
     st.markdown(
         f"""
         <div class="ai-card">
             <div class="ai-card-title">{safe_text(recommendation.get("drink_name"))}</div>
             <div class="ai-card-meta">
-                {safe_text(recommendation.get("caffeine_level"))} caffeine
+                {safe_text(recommendation.get("size"))} ·
+                {safe_text(recommendation.get("temperature"))} ·
+                {safe_text(recommendation.get("caffeine_level"))} caffeine ·
+                {confidence:.0%} confidence
             </div>
             <p><strong>Ingredients:</strong> {ingredients}</p>
             <div class="ai-explanation">
-                {safe_text(recommendation.get("explanation"))}
+                {safe_text(recommendation.get("why_recommended"))}
             </div>
+            <p><strong>Memory used:</strong> {memory_used or "Current profile and context"}</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -902,7 +918,9 @@ def render_ai_recommendation(recommendation: dict[str, object]) -> None:
 
 
 def _save_ai_recommendation(
+    user_id: str,
     context: dict[str, object],
+    memory_summary: str,
     recommendation: dict[str, object],
 ) -> object | None:
     """Save generated recommendation context to Supabase."""
@@ -911,24 +929,59 @@ def _save_ai_recommendation(
         return None
 
     row = {
-        **context,
+        "user_id": user_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "context": context,
+        "memory_summary": memory_summary,
         "recommendation_json": recommendation,
         "rating": None,
         "would_order_again": None,
-        "too_sweet": None,
-        "too_bitter": None,
-        "too_much_caffeine": None,
         "feedback_text": None,
     }
     saved = insert_row("ai_recommendations", row)
     return saved.get("id")
 
 
+def _save_ai_feedback(
+    recommendation_id: object | None,
+    user_id: str,
+    context: dict[str, object],
+    memory_summary: str,
+    recommendation: dict[str, object],
+    values: dict[str, object],
+) -> object | None:
+    """Update an AI recommendation or insert it with feedback when needed."""
+    if recommendation_id is not None:
+        update_rows("ai_recommendations", values, {"id": recommendation_id})
+        return recommendation_id
+    row = {
+        "user_id": user_id,
+        "context": context,
+        "memory_summary": memory_summary,
+        **values,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "recommendation_json": recommendation,
+    }
+    return insert_row("ai_recommendations", row).get("id")
+
+
 def ai_recommendation_section() -> None:
-    """Render the simplified OpenAI recommendation and feedback experience."""
-    st.subheader("Quick Recommendation")
-    st.caption("One drink recommendation in under 30 seconds.")
+    """Render OpenAI reasoning over the current user's Supabase memory."""
+    st.markdown("## ✨ AI Recommendation")
+    st.caption("OpenAI reasons over your saved taste profile, ratings, favorites, and recent context.")
+    user = st.session_state.current_user
+    if not user:
+        st.info("Load or create a profile first.")
+        create_col, load_col = st.columns(2)
+        with create_col:
+            if st.button("Create Profile", key="ai_create_profile", use_container_width=True):
+                st.session_state.profile_mode = "create"
+                _set_flow_step(2)
+        with load_col:
+            if st.button("Load Profile", key="ai_load_profile", use_container_width=True):
+                st.session_state.profile_mode = "load"
+                _set_flow_step(2)
+        return
 
     with st.form("ai_recommendation_form"):
         col1, col2 = st.columns(2)
@@ -955,6 +1008,15 @@ def ai_recommendation_section() -> None:
                 "Temperature Preference",
                 ["no preference", "hot", "iced"],
             )
+            caffeine_preference = st.selectbox(
+                "Caffeine Preference",
+                ["any", "none", "low", "medium", "high"],
+            )
+            sweetness_preference = st.selectbox(
+                "Sweetness Preference",
+                ["any", "unsweetened", "light", "classic", "extra"],
+            )
+            dietary_restrictions = st.text_input("Dietary Restrictions")
             things_you_love = st.text_area(
                 "Things You Love",
                 placeholder="Vanilla, oat milk, cinnamon...",
@@ -964,44 +1026,86 @@ def ai_recommendation_section() -> None:
                 placeholder="Bitter flavors, whipped cream...",
             )
         submitted = st.form_submit_button(
-            "Get Recommendation",
+            "Generate AI Recommendation",
             type="primary",
             use_container_width=True,
         )
 
     if submitted:
+        context = {
+            "goal": goal,
+            "sleep_hours": sleep_hours,
+            "stress_level": stress_level,
+            "weather": weather,
+            "temperature_preference": preferred_temperature,
+            "caffeine_preference": caffeine_preference,
+            "sweetness_preference": sweetness_preference,
+            "likes": things_you_love.strip(),
+            "dislikes": things_you_hate.strip(),
+            "dietary_restrictions": dietary_restrictions.strip(),
+        }
         if not openai_is_configured():
-            st.error(
-                "OpenAI is not configured. Add OPENAI_API_KEY to Streamlit secrets "
-                "or local environment variables."
+            st.info("AI recommendations are not configured yet.")
+            matches, _, _ = recommend_with_fallback(
+                drinks=st.session_state.drinks,
+                temperature=None if preferred_temperature == "no preference" else preferred_temperature,
+                caffeine_level=None if caffeine_preference == "any" else caffeine_preference,
+                sweetness_level=None if sweetness_preference == "any" else sweetness_preference,
+                dietary_tag=dietary_restrictions.strip() or None,
+                user=user,
+                user_history=get_user_history(user["user_id"]),
+                ingredient_preferences=get_ingredient_preferences(user["user_id"]),
+                drink_recipes=load_recipes(),
+                context=context,
             )
+            st.session_state.ai_fallback_matches = matches
+            st.session_state.ai_recommendation = None
         else:
-            context = {
-                "user_name": "quick-beta-user",
-                "sleep_hours": sleep_hours,
-                "stress_level": stress_level,
-                "goal": goal,
-                "weather": weather,
-                "preferred_temperature": preferred_temperature,
-                "caffeine_preference": "any",
-                "milk_preference": "any",
-                "sweetness_preference": "any",
-                "dietary_restrictions": "",
-                "likes_dislikes": (
-                    f"Loves: {things_you_love.strip() or 'not specified'}; "
-                    f"Hates: {things_you_hate.strip() or 'not specified'}"
-                ),
-            }
             try:
-                with st.spinner("Your barista is thinking..."):
-                    recommendation = generate_drink_recommendation(context)
-                    recommendation_id = _save_ai_recommendation(context, recommendation)
-            except Exception as error:
-                st.error(f"Could not create a recommendation: {error}")
+                with st.spinner("Reasoning over your taste memory..."):
+                    memory_summary = build_user_memory_summary(user["user_id"])
+                    recommendation = generate_ai_recommendation(
+                        user["user_id"],
+                        context,
+                        st.session_state.drinks,
+                    )
+                try:
+                    recommendation_id = _save_ai_recommendation(
+                        user["user_id"],
+                        context,
+                        memory_summary,
+                        recommendation,
+                    )
+                except Exception:
+                    recommendation_id = None
+                    st.warning("Your AI recommendation is ready, but it could not be saved yet.")
+            except Exception:
+                st.warning("AI recommendation was unavailable, so here are your best standard matches.")
+                matches, _, _ = recommend_with_fallback(
+                    drinks=st.session_state.drinks,
+                    temperature=None if preferred_temperature == "no preference" else preferred_temperature,
+                    caffeine_level=None if caffeine_preference == "any" else caffeine_preference,
+                    sweetness_level=None if sweetness_preference == "any" else sweetness_preference,
+                    dietary_tag=dietary_restrictions.strip() or None,
+                    user=user,
+                    user_history=get_user_history(user["user_id"]),
+                    ingredient_preferences=get_ingredient_preferences(user["user_id"]),
+                    drink_recipes=load_recipes(),
+                    context=context,
+                )
+                st.session_state.ai_fallback_matches = matches
+                st.session_state.ai_recommendation = None
             else:
                 st.session_state.ai_recommendation = recommendation
                 st.session_state.ai_recommendation_context = context
                 st.session_state.ai_recommendation_id = recommendation_id
+                st.session_state.ai_memory_summary = memory_summary
+                st.session_state.ai_fallback_matches = None
+
+    fallback_matches = st.session_state.ai_fallback_matches
+    if fallback_matches is not None and not fallback_matches.empty:
+        st.markdown("### Standard Recommendation")
+        render_guided_recommendation_cards(fallback_matches, limit=3)
 
     recommendation = st.session_state.ai_recommendation
     if not recommendation:
@@ -1016,8 +1120,9 @@ def ai_recommendation_section() -> None:
             ["Yes", "No"],
             horizontal=True,
         )
+        feedback_text = st.text_area("Optional feedback")
         feedback_submitted = st.form_submit_button(
-            "Save Rating",
+            "Save AI Recommendation Feedback",
             use_container_width=True,
         )
 
@@ -1025,30 +1130,38 @@ def ai_recommendation_section() -> None:
         values = {
             "rating": rating,
             "would_order_again": would_order_again == "Yes",
-            "too_sweet": None,
-            "too_bitter": None,
-            "too_much_caffeine": None,
-            "feedback_text": None,
+            "feedback_text": feedback_text.strip() or None,
         }
         try:
             recommendation_id = st.session_state.ai_recommendation_id
-            if recommendation_id is not None:
-                update_rows("ai_recommendations", values, {"id": recommendation_id})
-            elif supabase_is_configured():
-                row = {
-                    **st.session_state.ai_recommendation_context,
-                    **values,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                    "recommendation_json": recommendation,
-                }
-                saved = insert_row("ai_recommendations", row)
-                st.session_state.ai_recommendation_id = saved.get("id")
-            else:
+            if not supabase_is_configured():
                 raise RuntimeError("Supabase is not configured.")
-        except RuntimeError as error:
-            st.error(str(error))
+            st.session_state.ai_recommendation_id = _save_ai_feedback(
+                recommendation_id,
+                user["user_id"],
+                st.session_state.ai_recommendation_context,
+                st.session_state.ai_memory_summary,
+                recommendation,
+                values,
+            )
+            catalog_match = st.session_state.drinks[
+                st.session_state.drinks["drink_name"].astype(str).str.lower()
+                == str(recommendation.get("drink_name", "")).lower()
+            ]
+            if not catalog_match.empty:
+                try:
+                    save_rating(
+                        user["user_id"],
+                        str(catalog_match.iloc[0]["drink_id"]),
+                        rating,
+                        would_order_again == "Yes",
+                    )
+                except Exception:
+                    pass
+        except Exception:
+            st.warning("Your feedback could not be saved yet. The recommendation is still available.")
         else:
-            st.success("Thanks. Your feedback was saved.")
+            st.success("Thanks. Your feedback was saved and will inform future recommendations.")
 
 
 def ingredient_list_section() -> None:
@@ -1474,10 +1587,10 @@ def home_actions() -> None:
     """Render clear welcome actions."""
     st.markdown("## Welcome")
     st.write("Create a taste profile, tell us what today needs, and meet your drink.")
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         if st.button(
-            "Start Recommendation",
+            "Standard Recommendation",
             type="primary",
             use_container_width=True,
         ):
@@ -1486,6 +1599,9 @@ def home_actions() -> None:
         if st.button("Create / Load Profile", use_container_width=True):
             _set_flow_step(2)
     with col3:
+        if st.button("✨ AI Recommendation", use_container_width=True, key="home_ai"):
+            _go_to_page("ai")
+    with col4:
         if st.button("View My Profile", use_container_width=True):
             _go_to_page("profile")
 
@@ -2026,11 +2142,13 @@ def sidebar_navigation() -> None:
     if st.sidebar.button("My Profile", key="nav_profile", use_container_width=True):
         _go_to_page("profile")
     if st.sidebar.button(
-        "Get Recommendation",
+        "Standard Recommendation",
         key="nav_recommendation",
         use_container_width=True,
     ):
         _start_recommendation()
+    if st.sidebar.button("✨ AI Recommendation", key="nav_ai", use_container_width=True):
+        _go_to_page("ai")
     if st.sidebar.button("Advanced Tools", key="nav_advanced", use_container_width=True):
         _go_to_page("advanced")
 
@@ -2105,6 +2223,8 @@ def main() -> None:
     elif page == "advanced":
         st.markdown("## Advanced Tools")
         advanced_tools_section(expanded=True)
+    elif page == "ai":
+        ai_recommendation_section()
     else:
         guided_flow()
 
