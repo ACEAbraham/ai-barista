@@ -1,5 +1,6 @@
 """Streamlit web app for AI Barista data collection."""
 
+from datetime import datetime, timezone
 from html import escape
 
 import pandas as pd
@@ -13,17 +14,17 @@ from ingredient_engine import (
     add_ingredient,
     build_custom_drink_from_ingredients,
     custom_drink_exists,
+    get_ingredient_preferences,
     get_taste_profile,
-    load_ingredient_preferences,
     load_ingredients,
     load_recipes,
     save_custom_drink_recipe,
-    update_ingredient_preferences,
 )
+from openai_client import generate_drink_recommendation, openai_is_configured
 from profile import create_user, get_user_history, load_user, save_rating
 from profile import load_users as load_supabase_users
 from recommender import recommend_with_fallback
-from supabase_client import supabase_is_configured
+from supabase_client import insert_row, supabase_is_configured, update_rows
 
 
 def apply_theme() -> None:
@@ -226,6 +227,12 @@ def initialize_state() -> None:
         st.session_state.current_user = None
     if "ingredients" not in st.session_state:
         st.session_state.ingredients = load_ingredients()
+    if "ai_recommendation" not in st.session_state:
+        st.session_state.ai_recommendation = None
+    if "ai_recommendation_context" not in st.session_state:
+        st.session_state.ai_recommendation_context = None
+    if "ai_recommendation_id" not in st.session_state:
+        st.session_state.ai_recommendation_id = None
 
 
 def save_warning() -> None:
@@ -316,6 +323,187 @@ def render_recommendation_cards(matches: pd.DataFrame, limit: int = 10) -> None:
             """,
             unsafe_allow_html=True,
         )
+
+
+def render_ai_recommendation(recommendation: dict[str, object]) -> None:
+    """Render one OpenAI drink recommendation."""
+    ingredients = ", ".join(
+        safe_text(item) for item in recommendation.get("ingredients", [])
+    )
+    st.markdown(
+        f"""
+        <div class="ai-card">
+            <div class="ai-card-title">{safe_text(recommendation.get("drink_name"))}</div>
+            <div class="ai-card-meta">
+                {safe_text(recommendation.get("caffeine_level"))} caffeine
+            </div>
+            <p><strong>Ingredients:</strong> {ingredients}</p>
+            <div class="ai-explanation">
+                {safe_text(recommendation.get("explanation"))}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _save_ai_recommendation(
+    context: dict[str, object],
+    recommendation: dict[str, object],
+) -> object | None:
+    """Save generated recommendation context to Supabase."""
+    if not supabase_is_configured():
+        save_warning()
+        return None
+
+    row = {
+        **context,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "recommendation_json": recommendation,
+        "rating": None,
+        "would_order_again": None,
+        "too_sweet": None,
+        "too_bitter": None,
+        "too_much_caffeine": None,
+        "feedback_text": None,
+    }
+    saved = insert_row("ai_recommendations", row)
+    return saved.get("id")
+
+
+def ai_recommendation_section() -> None:
+    """Render the simplified OpenAI recommendation and feedback experience."""
+    st.subheader("Quick Recommendation")
+    st.caption("One drink recommendation in under 30 seconds.")
+
+    with st.form("ai_recommendation_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            sleep_hours = st.number_input(
+                "Sleep Hours",
+                min_value=0.0,
+                max_value=16.0,
+                value=7.0,
+                step=0.5,
+                key="ai_sleep_hours",
+            )
+            stress_level = st.selectbox("Stress Level", ["low", "medium", "high"])
+            goal = st.selectbox(
+                "Goal",
+                ["energy", "focus", "comfort", "study", "workout", "treat"],
+            )
+            weather = st.selectbox(
+                "Weather",
+                ["sunny", "cloudy", "rainy", "snowy", "hot", "cold"],
+            )
+        with col2:
+            preferred_temperature = st.selectbox(
+                "Temperature Preference",
+                ["no preference", "hot", "iced"],
+            )
+            things_you_love = st.text_area(
+                "Things You Love",
+                placeholder="Vanilla, oat milk, cinnamon...",
+            )
+            things_you_hate = st.text_area(
+                "Things You Hate",
+                placeholder="Bitter flavors, whipped cream...",
+            )
+        submitted = st.form_submit_button(
+            "Get Recommendation",
+            type="primary",
+            use_container_width=True,
+        )
+
+    if submitted:
+        if not openai_is_configured():
+            st.error(
+                "OpenAI is not configured. Add OPENAI_API_KEY to Streamlit secrets "
+                "or local environment variables."
+            )
+        else:
+            context = {
+                "user_name": "quick-beta-user",
+                "sleep_hours": sleep_hours,
+                "stress_level": stress_level,
+                "goal": goal,
+                "weather": weather,
+                "preferred_temperature": preferred_temperature,
+                "caffeine_preference": "any",
+                "milk_preference": "any",
+                "sweetness_preference": "any",
+                "dietary_restrictions": "",
+                "likes_dislikes": (
+                    f"Loves: {things_you_love.strip() or 'not specified'}; "
+                    f"Hates: {things_you_hate.strip() or 'not specified'}"
+                ),
+            }
+            try:
+                with st.spinner("Your barista is thinking..."):
+                    recommendation = generate_drink_recommendation(context)
+                    recommendation_id = _save_ai_recommendation(context, recommendation)
+            except Exception as error:
+                st.error(f"Could not create a recommendation: {error}")
+            else:
+                st.session_state.ai_recommendation = recommendation
+                st.session_state.ai_recommendation_context = context
+                st.session_state.ai_recommendation_id = recommendation_id
+
+    recommendation = st.session_state.ai_recommendation
+    if not recommendation:
+        return
+
+    render_ai_recommendation(recommendation)
+    st.markdown("### Rate This Recommendation")
+    with st.form("ai_feedback_form"):
+        rating = st.slider("Rating", 1, 5, 4)
+        would_order_again = st.radio(
+            "Would order again?",
+            ["Yes", "No"],
+            horizontal=True,
+        )
+        feedback_submitted = st.form_submit_button(
+            "Save Rating",
+            use_container_width=True,
+        )
+
+    if feedback_submitted:
+        values = {
+            "rating": rating,
+            "would_order_again": would_order_again == "Yes",
+            "too_sweet": None,
+            "too_bitter": None,
+            "too_much_caffeine": None,
+            "feedback_text": None,
+        }
+        try:
+            recommendation_id = st.session_state.ai_recommendation_id
+            if recommendation_id is not None:
+                update_rows("ai_recommendations", values, {"id": recommendation_id})
+            elif supabase_is_configured():
+                row = {
+                    **st.session_state.ai_recommendation_context,
+                    **values,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "recommendation_json": recommendation,
+                }
+                saved = insert_row("ai_recommendations", row)
+                st.session_state.ai_recommendation_id = saved.get("id")
+            else:
+                raise RuntimeError("Supabase is not configured.")
+        except RuntimeError as error:
+            st.error(str(error))
+        else:
+            st.success("Thanks. Your feedback was saved.")
+
+
+def ingredient_list_section() -> None:
+    """Render the current ingredient catalog."""
+    st.subheader("Ingredient List")
+    st.dataframe(
+        st.session_state.ingredients.sort_values(["category", "ingredient_name"]),
+        width="stretch",
+    )
 
 
 def create_profile_section() -> None:
@@ -429,7 +617,9 @@ def recommendation_section() -> None:
             dietary_tag=None if dietary_tag == "Any" else dietary_tag,
             user=user,
             user_history=get_user_history(user["user_id"]) if user else None,
-            ingredient_preferences=load_ingredient_preferences(),
+            ingredient_preferences=(
+                get_ingredient_preferences(user["user_id"]) if user else None
+            ),
             drink_recipes=load_recipes(),
         )
         st.session_state.last_matches = matches
@@ -566,7 +756,6 @@ def custom_drink_section() -> None:
         if user and rate_now:
             try:
                 save_rating(user["user_id"], custom_drink["drink_id"], rating, would_order_again)
-                update_ingredient_preferences(user["user_id"], custom_drink["drink_id"], rating)
             except RuntimeError as error:
                 st.error(str(error))
                 return
@@ -664,7 +853,6 @@ def rate_drink_section() -> None:
     if submitted:
         try:
             save_rating(user["user_id"], drink_id, rating, would_order_again)
-            update_ingredient_preferences(user["user_id"], drink_id, rating)
             log_session(
                 user_id=user["user_id"],
                 drink_id=drink_id,
@@ -737,7 +925,7 @@ def main() -> None:
         """
         <section class="ai-title-section">
             <h1>AI Barista</h1>
-            <p>Personalized beverage recommendations powered by your taste, context, and feedback.</p>
+            <p>A quick drink recommendation for how today feels.</p>
         </section>
         """,
         unsafe_allow_html=True,
@@ -745,39 +933,49 @@ def main() -> None:
     if not supabase_is_configured():
         st.warning(
             "Supabase credentials are not configured locally. Static catalog browsing works, "
-            "but profiles, ratings, sessions, and custom drinks require SUPABASE_URL and SUPABASE_KEY."
+            "but recommendations and feedback require SUPABASE_URL and SUPABASE_KEY."
         )
-    st.sidebar.write(f"Current profile: **{current_user_label()}**")
 
-    sections = st.tabs(
-        [
-            "Create profile",
-            "Load profile",
-            "Find recommended drinks",
-            "Create custom drink",
-            "Add ingredient",
-            "Rate a drink",
-            "Rating history",
-            "Taste profile",
-        ]
-    )
+    ai_recommendation_section()
 
-    with sections[0]:
-        create_profile_section()
-    with sections[1]:
-        load_profile_section()
-    with sections[2]:
-        recommendation_section()
-    with sections[3]:
-        custom_drink_section()
-    with sections[4]:
-        add_ingredient_section()
-    with sections[5]:
-        rate_drink_section()
-    with sections[6]:
-        rating_history_section()
-    with sections[7]:
-        taste_profile_section()
+    with st.expander("Advanced Tools", expanded=False):
+        advanced = st.tabs(
+            [
+                "Create Profile",
+                "Create Custom Drink",
+                "Add Ingredient",
+                "Ingredient List",
+                "More",
+            ]
+        )
+        with advanced[0]:
+            create_profile_section()
+        with advanced[1]:
+            custom_drink_section()
+        with advanced[2]:
+            add_ingredient_section()
+        with advanced[3]:
+            ingredient_list_section()
+        with advanced[4]:
+            more_tabs = st.tabs(
+                [
+                    "Rule-based recommendations",
+                    "Load profile",
+                    "Rate drink",
+                    "Rating history",
+                    "Taste profile",
+                ]
+            )
+            with more_tabs[0]:
+                recommendation_section()
+            with more_tabs[1]:
+                load_profile_section()
+            with more_tabs[2]:
+                rate_drink_section()
+            with more_tabs[3]:
+                rating_history_section()
+            with more_tabs[4]:
+                taste_profile_section()
 
 
 if __name__ == "__main__":

@@ -55,3 +55,39 @@ def insert_row(table_name: str, row: dict[str, object]) -> dict[str, object]:
     if response.data:
         return response.data[0]
     return row
+
+
+def upsert_row(
+    table_name: str,
+    row: dict[str, object],
+    on_conflict: str,
+) -> dict[str, object]:
+    """Insert or update one row using the table's unique conflict columns."""
+    client = get_supabase()
+    if client is None:
+        raise RuntimeError(
+            "Supabase is not configured. Add SUPABASE_URL and SUPABASE_KEY "
+            "to Streamlit secrets or local environment variables."
+        )
+
+    response = client.table(table_name).upsert(row, on_conflict=on_conflict).execute()
+    if response.data:
+        return response.data[0]
+    return row
+
+
+def update_rows(
+    table_name: str,
+    values: dict[str, object],
+    match: dict[str, object],
+) -> list[dict[str, object]]:
+    """Update rows matching the supplied column values."""
+    client = get_supabase()
+    if client is None:
+        raise RuntimeError(
+            "Supabase is not configured. Add SUPABASE_URL and SUPABASE_KEY "
+            "to Streamlit secrets or local environment variables."
+        )
+
+    response = client.table(table_name).update(values).match(match).execute()
+    return response.data or []

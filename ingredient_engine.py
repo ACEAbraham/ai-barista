@@ -5,13 +5,11 @@ import re
 
 import pandas as pd
 
-from supabase_client import insert_row, table_to_dataframe
+from supabase_client import insert_row, table_to_dataframe, upsert_row
 
 
 INGREDIENTS_FILE = Path(__file__).with_name("ingredients.csv")
 RECIPES_FILE = Path(__file__).with_name("drink_recipes.csv")
-PREFERENCES_FILE = Path(__file__).with_name("ingredient_preferences.csv")
-
 RECIPE_COLUMNS = ["drink_id", "ingredient_id", "quantity", "unit"]
 PREFERENCE_COLUMNS = ["user_id", "ingredient_id", "preference_score"]
 CUSTOM_DRINK_COLUMNS = [
@@ -177,10 +175,18 @@ def custom_drink_exists(drink_name: str, recipe_items: list[dict[str, object]]) 
 
 
 def load_ingredient_preferences() -> pd.DataFrame:
-    """Load ingredient preference scores."""
-    if PREFERENCES_FILE.exists():
-        return pd.read_csv(PREFERENCES_FILE)
-    return pd.DataFrame(columns=PREFERENCE_COLUMNS)
+    """Load all ingredient preference scores from Supabase."""
+    return table_to_dataframe("ingredient_preferences", PREFERENCE_COLUMNS)
+
+
+def get_ingredient_preferences(user_id: str) -> pd.DataFrame:
+    """Load the live ingredient preference scores for one user."""
+    preferences = load_ingredient_preferences()
+    if preferences.empty:
+        return preferences
+    return preferences[
+        preferences["user_id"].astype(str).str.lower() == str(user_id).lower()
+    ].copy()
 
 
 def _rating_adjustment(rating: int) -> int:
@@ -197,60 +203,45 @@ def _rating_adjustment(rating: int) -> int:
 
 
 def update_ingredient_preferences(user_id: str, drink_id: str, rating: int) -> pd.DataFrame:
-    """Update a user's ingredient scores from a drink rating."""
+    """Immediately update a user's Supabase ingredient scores from a rating."""
     adjustment = _rating_adjustment(rating)
-    preferences = load_ingredient_preferences()
     if adjustment == 0:
-        return preferences
+        return get_ingredient_preferences(user_id)
 
     recipes = load_recipes()
     drink_recipe = recipes[recipes["drink_id"].astype(str).str.lower() == drink_id.lower()]
     if drink_recipe.empty:
-        return preferences
+        return get_ingredient_preferences(user_id)
 
-    for _, recipe_row in drink_recipe.iterrows():
-        ingredient_id = recipe_row["ingredient_id"]
-        quantity = float(recipe_row["quantity"])
-        score_delta = adjustment * quantity
-        mask = (
-            (preferences["user_id"].astype(str).str.lower() == user_id.lower())
-            & (preferences["ingredient_id"].astype(str) == ingredient_id)
+    preferences = get_ingredient_preferences(user_id)
+    current_scores = (
+        preferences.set_index("ingredient_id")["preference_score"].astype(float).to_dict()
+        if not preferences.empty
+        else {}
+    )
+    ingredient_quantities = drink_recipe.groupby("ingredient_id")["quantity"].sum()
+
+    for ingredient_id, quantity in ingredient_quantities.items():
+        score = current_scores.get(ingredient_id, 0.0) + adjustment * float(quantity)
+        upsert_row(
+            "ingredient_preferences",
+            {
+                "user_id": user_id,
+                "ingredient_id": ingredient_id,
+                "preference_score": score,
+            },
+            on_conflict="user_id,ingredient_id",
         )
 
-        if mask.any():
-            preferences.loc[mask, "preference_score"] = (
-                preferences.loc[mask, "preference_score"].astype(float) + score_delta
-            )
-        else:
-            preferences = pd.concat(
-                [
-                    preferences,
-                    pd.DataFrame(
-                        [
-                            {
-                                "user_id": user_id,
-                                "ingredient_id": ingredient_id,
-                                "preference_score": score_delta,
-                            }
-                        ]
-                    ),
-                ],
-                ignore_index=True,
-            )
-
-    preferences.to_csv(PREFERENCES_FILE, index=False)
-    return preferences
+    return get_ingredient_preferences(user_id)
 
 
 def get_taste_profile(user_id: str) -> dict[str, pd.DataFrame]:
     """Return favorite, least favorite, and most common ingredients for a user."""
-    preferences = load_ingredient_preferences()
     recipes = load_recipes()
     ingredients = load_ingredients()
     ratings = table_to_dataframe("ratings", RATING_COLUMNS)
-    user_preferences = preferences[
-        preferences["user_id"].astype(str).str.lower() == user_id.lower()
-    ].copy()
+    user_preferences = get_ingredient_preferences(user_id)
 
     if user_preferences.empty:
         scored = pd.DataFrame(columns=["ingredient_id", "ingredient_name", "preference_score"])

@@ -70,7 +70,7 @@ def save_rating(
     rating: int,
     would_order_again: bool,
 ) -> dict[str, object]:
-    """Save a drink rating to Supabase."""
+    """Save a drink rating and immediately learn its ingredient preferences."""
     new_rating = {
         "user_id": user_id,
         "drink_id": drink_id,
@@ -78,7 +78,13 @@ def save_rating(
         "would_order_again": would_order_again,
     }
 
-    return insert_row("ratings", new_rating)
+    saved_rating = insert_row("ratings", new_rating)
+
+    # Import here to keep profile storage independent during module loading.
+    from ingredient_engine import update_ingredient_preferences
+
+    update_ingredient_preferences(user_id, drink_id, rating)
+    return saved_rating
 
 
 def get_user_history(user_id: str) -> pd.DataFrame:

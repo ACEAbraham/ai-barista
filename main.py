@@ -4,14 +4,13 @@ from customization import log_session
 from drink_database import list_options, load_drinks
 from ingredient_engine import (
     build_custom_drink_from_ingredients,
+    get_ingredient_preferences,
     get_taste_profile,
-    load_ingredient_preferences,
     load_ingredients,
     load_recipes,
     parse_recipe_input,
     save_custom_drink_recipe,
     show_ingredients_by_category,
-    update_ingredient_preferences,
 )
 from profile import create_user, get_user_history, load_user, save_rating
 from recommender import recommend_drinks
@@ -170,7 +169,11 @@ def find_drinks(drinks, current_user: dict[str, str] | None) -> None:
             if current_user
             else None
         ),
-        ingredient_preferences=load_ingredient_preferences(),
+        ingredient_preferences=(
+            get_ingredient_preferences(current_user["user_id"])
+            if current_user
+            else None
+        ),
         drink_recipes=load_recipes(),
     )
     display_matches(matches)
@@ -212,11 +215,6 @@ def rate_drink(drinks, current_user: dict[str, str] | None) -> None:
     print(
         f"Saved rating {saved['rating']} for "
         f"{drink.iloc[0]['drink_name']}."
-    )
-    update_ingredient_preferences(
-        user_id=current_user["user_id"],
-        drink_id=drink.iloc[0]["drink_id"],
-        rating=rating,
     )
     print("Updated your ingredient taste profile.")
     log_session(
@@ -275,11 +273,6 @@ def create_custom_drink(drinks, current_user: dict[str, str] | None):
                 drink_id=custom_drink["drink_id"],
                 rating=rating_value,
                 would_order_again=would_order_again,
-            )
-            update_ingredient_preferences(
-                user_id=current_user["user_id"],
-                drink_id=custom_drink["drink_id"],
-                rating=rating_value,
             )
             print("Updated your ingredient taste profile.")
 
