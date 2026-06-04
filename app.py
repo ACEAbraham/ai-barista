@@ -9,6 +9,7 @@ import streamlit as st
 from customization import log_session
 from drink_database import list_options, load_drinks
 from drink_images import get_drink_image
+from favorites import get_user_favorites, remove_favorite, save_favorite
 from ingredient_engine import (
     SUPPORTED_CATEGORIES,
     SUPPORTED_UNITS,
@@ -614,20 +615,74 @@ def render_consumer_cards(matches: pd.DataFrame, limit: int = 3) -> None:
                     st.rerun()
 
 
-def _save_favorite(user_id: str, drink_id: str) -> tuple[bool, str]:
-    """Save a favorite, returning a friendly fallback if unavailable."""
+def save_favorite_action(
+    user_id: str,
+    drink_id: str,
+    drink_name: str,
+) -> tuple[bool, str]:
+    """Save a favorite and return a friendly duplicate-aware message."""
     try:
-        insert_row(
-            "favorites",
-            {
-                "user_id": user_id,
-                "drink_id": drink_id,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            },
-        )
-    except Exception:
-        return False, "Favorites coming soon."
+        saved = save_favorite(user_id, drink_id, drink_name)
+    except Exception as error:
+        return False, f"Could not save favorite: {error}"
+    if saved is None:
+        return False, "Already in favorites."
     return True, "Saved to favorites."
+
+
+def render_favorites_section(user_id: str) -> None:
+    """Render a user's favorite drinks as compact cards."""
+    st.markdown("### My Favorites")
+    try:
+        favorites = get_user_favorites(user_id)
+    except Exception as error:
+        st.info(f"Favorites are unavailable right now: {error}")
+        return
+
+    if favorites.empty:
+        st.info("Save a drink you love and it will appear here.")
+        return
+
+    rows = list(favorites.head(6).iterrows())
+    for start in range(0, len(rows), 3):
+        row_items = rows[start : start + 3]
+        for column, (_, favorite) in zip(st.columns(len(row_items)), row_items):
+            drink_matches = st.session_state.drinks[
+                st.session_state.drinks["drink_id"].astype(str)
+                == str(favorite.get("drink_id", ""))
+            ]
+            drink = (
+                drink_matches.iloc[0].to_dict()
+                if not drink_matches.empty
+                else {
+                    "drink_id": favorite.get("drink_id"),
+                    "drink_name": favorite.get("drink_name"),
+                }
+            )
+            with column:
+                with st.container(border=True):
+                    st.image(get_drink_image(drink), width="stretch")
+                    st.markdown(f"**{safe_text(favorite.get('drink_name', 'Favorite drink'))}**")
+                    if st.button(
+                        "View Details",
+                        key=f"favorite_details_{favorite.get('drink_id')}",
+                        use_container_width=True,
+                    ):
+                        st.session_state.selected_drink_id = favorite.get("drink_id")
+                        st.session_state.selected_drink = drink
+                        _set_flow_step(5)
+                    if st.button(
+                        "Remove",
+                        key=f"favorite_remove_{favorite.get('drink_id')}",
+                        use_container_width=True,
+                    ):
+                        try:
+                            remove_favorite(user_id, str(favorite.get("drink_id")))
+                        except Exception as error:
+                            st.error(f"Could not remove favorite: {error}")
+                        else:
+                            st.success("Removed from favorites.")
+                            st.rerun()
 
 
 def drink_detail_section() -> None:
@@ -676,9 +731,13 @@ def drink_detail_section() -> None:
         user = st.session_state.current_user
         if st.button("Save to Favorites", use_container_width=True):
             if not user:
-                st.info("Load or create a profile to save favorites.")
+                st.info("Load or create a profile first.")
             else:
-                saved, message = _save_favorite(user["user_id"], str(drink_id))
+                saved, message = save_favorite_action(
+                    user["user_id"],
+                    str(drink_id),
+                    str(drink.get("drink_name", "Favorite drink")),
+                )
                 (st.success if saved else st.info)(message)
 
     ratings = load_ratings()
@@ -1740,9 +1799,13 @@ def guided_detail_step() -> None:
         user = st.session_state.current_user
         if st.button("Save to Favorites", use_container_width=True, key="guided_save_favorite"):
             if not user:
-                st.info("Load or create a profile to save favorites.")
+                st.info("Load or create a profile first.")
             else:
-                saved, message = _save_favorite(user["user_id"], str(drink["drink_id"]))
+                saved, message = save_favorite_action(
+                    user["user_id"],
+                    str(drink["drink_id"]),
+                    str(drink.get("drink_name", "Favorite drink")),
+                )
                 (st.success if saved else st.info)(message)
 
     ratings = load_ratings()
@@ -1838,6 +1901,7 @@ def guided_profile_summary_step() -> None:
         return
     render_profile_card(user)
     render_taste_profile_cards(user["user_id"])
+    render_favorites_section(user["user_id"])
     if st.button("Get another recommendation", type="primary", use_container_width=True):
         _set_flow_step(3)
 
@@ -1885,6 +1949,7 @@ def my_profile_page() -> None:
 
     render_profile_card(user)
     render_taste_profile_cards(user["user_id"])
+    render_favorites_section(user["user_id"])
     if st.button(
         "Get Recommendation",
         type="primary",
