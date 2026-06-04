@@ -375,6 +375,10 @@ def initialize_state() -> None:
         st.session_state.consumer_matches = None
     if "flow_step" not in st.session_state:
         st.session_state.flow_step = 1
+    if "current_step" not in st.session_state:
+        st.session_state.current_step = st.session_state.flow_step
+    if "selected_page" not in st.session_state:
+        st.session_state.selected_page = "home"
     if "profile_mode" not in st.session_state:
         st.session_state.profile_mode = None
     if "today_goal" not in st.session_state:
@@ -1382,15 +1386,45 @@ def taste_profile_section() -> None:
 def _set_flow_step(step: int) -> None:
     """Move the guided experience to a new step."""
     st.session_state.flow_step = step
+    st.session_state.current_step = step
+    st.session_state.selected_page = "guided"
     st.rerun()
+
+
+def _go_to_page(page: str) -> None:
+    """Navigate to a manual page."""
+    st.session_state.selected_page = page
+    st.rerun()
+
+
+def _start_recommendation() -> None:
+    """Start recommendations, guiding new users through profiles first."""
+    _set_flow_step(3 if st.session_state.current_user else 2)
+
+
+def home_actions() -> None:
+    """Render clear welcome actions."""
+    st.markdown("## Welcome")
+    st.write("Create a taste profile, tell us what today needs, and meet your drink.")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button(
+            "Start Recommendation",
+            type="primary",
+            use_container_width=True,
+        ):
+            _start_recommendation()
+    with col2:
+        if st.button("Create / Load Profile", use_container_width=True):
+            _set_flow_step(2)
+    with col3:
+        if st.button("View My Profile", use_container_width=True):
+            _go_to_page("profile")
 
 
 def guided_welcome_step() -> None:
     """Render the welcome step."""
-    st.markdown("## Welcome")
-    st.write("Create a taste profile, tell us what today needs, and meet your drink.")
-    if st.button("Start", type="primary", use_container_width=True):
-        _set_flow_step(2)
+    home_actions()
 
 
 def guided_profile_step() -> None:
@@ -1458,6 +1492,8 @@ def guided_profile_step() -> None:
             refresh_data()
             st.session_state.flow_message = "Profile created successfully."
             st.session_state.flow_step = 3
+            st.session_state.current_step = 3
+            st.session_state.selected_page = "guided"
             st.rerun()
 
     elif st.session_state.profile_mode == "load":
@@ -1476,6 +1512,8 @@ def guided_profile_step() -> None:
             st.session_state.current_user = user
             st.session_state.flow_message = f"Welcome back, {user['name']}."
             st.session_state.flow_step = 3
+            st.session_state.current_step = 3
+            st.session_state.selected_page = "guided"
             st.rerun()
 
 
@@ -1762,7 +1800,8 @@ def guided_profile_summary_step() -> None:
 
 def guided_flow() -> None:
     """Render exactly one step of the main onboarding and recommendation flow."""
-    step = int(st.session_state.flow_step)
+    step = int(st.session_state.current_step)
+    st.session_state.flow_step = step
     st.markdown(f'<div class="flow-progress">Step {min(step, 6)} of 6</div>', unsafe_allow_html=True)
     if st.session_state.flow_message:
         st.success(st.session_state.flow_message)
@@ -1783,32 +1822,57 @@ def guided_flow() -> None:
         guided_profile_summary_step()
 
 
-def main() -> None:
-    """Run the Streamlit app."""
-    st.set_page_config(page_title="AI Barista", layout="wide")
-    apply_theme()
-    initialize_state()
+def my_profile_page() -> None:
+    """Render direct profile access from navigation."""
+    user = st.session_state.current_user
+    st.markdown("## Your Taste Profile")
+    if not user:
+        st.info("Load or create a profile first.")
+        create_col, load_col = st.columns(2)
+        with create_col:
+            if st.button("Create Profile", use_container_width=True):
+                st.session_state.profile_mode = "create"
+                _set_flow_step(2)
+        with load_col:
+            if st.button("Load Profile", use_container_width=True):
+                st.session_state.profile_mode = "load"
+                _set_flow_step(2)
+        return
 
-    st.markdown(
-        """
-        <section class="ai-title-section">
-            <h1>☕ AI Barista</h1>
-            <p>Your personal drink recommendation engine.</p>
-        </section>
-        """,
-        unsafe_allow_html=True,
-    )
-    if not supabase_is_configured():
-        st.warning(
-            "Supabase credentials are not configured locally. Static catalog browsing works, "
-            "but recommendations and feedback require SUPABASE_URL and SUPABASE_KEY."
-        )
+    render_profile_card(user)
+    render_taste_profile_cards(user["user_id"])
+    if st.button(
+        "Get Recommendation",
+        type="primary",
+        use_container_width=True,
+        key="profile_get_recommendation",
+    ):
+        _set_flow_step(3)
 
-    guided_flow()
 
+def sidebar_navigation() -> None:
+    """Render persistent manual navigation."""
+    st.sidebar.markdown("### AI Barista")
+    st.sidebar.caption(current_user_label())
+    if st.sidebar.button("Home", key="nav_home", use_container_width=True):
+        _go_to_page("home")
+    if st.sidebar.button("My Profile", key="nav_profile", use_container_width=True):
+        _go_to_page("profile")
+    if st.sidebar.button(
+        "Get Recommendation",
+        key="nav_recommendation",
+        use_container_width=True,
+    ):
+        _start_recommendation()
+    if st.sidebar.button("Advanced Tools", key="nav_advanced", use_container_width=True):
+        _go_to_page("advanced")
+
+
+def advanced_tools_section(expanded: bool = False) -> None:
+    """Render advanced customization and database tools."""
     with st.expander(
         "⚙️ Advanced Tools · Create custom drinks, add ingredients, and explore your data.",
-        expanded=False,
+        expanded=expanded,
     ):
         st.caption("Database and customization tools for deeper exploration.")
         advanced = st.tabs(
@@ -1845,6 +1909,43 @@ def main() -> None:
                 rating_history_section()
             with admin_tabs[4]:
                 taste_profile_section()
+
+
+def main() -> None:
+    """Run the Streamlit app."""
+    st.set_page_config(page_title="AI Barista", layout="wide")
+    apply_theme()
+    initialize_state()
+    sidebar_navigation()
+
+    st.markdown(
+        """
+        <section class="ai-title-section">
+            <h1>☕ AI Barista</h1>
+            <p>Your personal drink recommendation engine.</p>
+        </section>
+        """,
+        unsafe_allow_html=True,
+    )
+    if not supabase_is_configured():
+        st.warning(
+            "Supabase credentials are not configured locally. Static catalog browsing works, "
+            "but recommendations and feedback require SUPABASE_URL and SUPABASE_KEY."
+        )
+
+    page = st.session_state.selected_page
+    if page == "home":
+        home_actions()
+    elif page == "profile":
+        my_profile_page()
+    elif page == "advanced":
+        st.markdown("## Advanced Tools")
+        advanced_tools_section(expanded=True)
+    else:
+        guided_flow()
+
+    if page != "advanced":
+        advanced_tools_section(expanded=False)
 
 
 if __name__ == "__main__":
