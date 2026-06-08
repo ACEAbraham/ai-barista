@@ -23,7 +23,7 @@ from ingredient_engine import (
     load_recipes,
     save_custom_drink_recipe,
 )
-from openai_client import openai_is_configured
+from openai_client import build_user_memory_summary, openai_is_configured
 from openai_recommender import fallback_recommendation, select_best_candidate
 from profile import (
     create_user,
@@ -911,7 +911,7 @@ def consumer_recommendation_section() -> None:
 
 
 def render_ai_recommendation(recommendation: dict[str, object]) -> None:
-    """Render one memory-informed OpenAI drink recommendation."""
+    """Render one memory-informed drink recommendation."""
     ingredients = ", ".join(
         safe_text(item) for item in recommendation.get("ingredients", [])
     )
@@ -973,7 +973,7 @@ def _save_ai_feedback(
     recommendation: dict[str, object],
     values: dict[str, object],
 ) -> object | None:
-    """Update an AI recommendation or insert it with feedback when needed."""
+    """Update a recommendation or insert it with feedback when needed."""
     if recommendation_id is not None:
         update_rows("ai_recommendations", values, {"id": recommendation_id})
         return recommendation_id
@@ -989,9 +989,9 @@ def _save_ai_feedback(
 
 
 def ai_recommendation_section() -> None:
-    """Render OpenAI reasoning over the current user's Supabase memory."""
-    st.markdown("## ✨ AI Recommendation")
-    st.caption("OpenAI reasons over your saved taste profile, ratings, favorites, and recent context.")
+    """Deprecated compatibility wrapper for the single recommendation flow."""
+    st.markdown("## Recommendation")
+    st.caption("Uses your saved taste profile, ratings, favorites, and recent context.")
     user = st.session_state.current_user
     if not user:
         st.info("Load or create a profile first.")
@@ -1049,7 +1049,7 @@ def ai_recommendation_section() -> None:
                 placeholder="Bitter flavors, whipped cream...",
             )
         submitted = st.form_submit_button(
-            "Generate AI Recommendation",
+            "Get Recommendation",
             type="primary",
             use_container_width=True,
         )
@@ -1068,7 +1068,7 @@ def ai_recommendation_section() -> None:
             "dietary_restrictions": dietary_restrictions.strip(),
         }
         if not openai_is_configured():
-            st.info("AI recommendations are not configured yet.")
+            st.info("Recommendation generated using profile matching.")
             matches, _, _ = recommend_with_fallback(
                 drinks=st.session_state.drinks,
                 temperature=None if preferred_temperature == "no preference" else preferred_temperature,
@@ -1101,9 +1101,9 @@ def ai_recommendation_section() -> None:
                     )
                 except Exception:
                     recommendation_id = None
-                    st.warning("Your AI recommendation is ready, but it could not be saved yet.")
+                    st.warning("Your recommendation is ready, but it could not be saved yet.")
             except Exception:
-                st.warning("AI recommendation was unavailable, so here are your best standard matches.")
+                st.info("Recommendation generated using profile matching.")
                 matches, _, _ = recommend_with_fallback(
                     drinks=st.session_state.drinks,
                     temperature=None if preferred_temperature == "no preference" else preferred_temperature,
@@ -1127,7 +1127,7 @@ def ai_recommendation_section() -> None:
 
     fallback_matches = st.session_state.ai_fallback_matches
     if fallback_matches is not None and not fallback_matches.empty:
-        st.markdown("### Standard Recommendation")
+        st.markdown("### Recommendation")
         render_guided_recommendation_cards(fallback_matches, limit=3)
 
     recommendation = st.session_state.ai_recommendation
@@ -1145,7 +1145,7 @@ def ai_recommendation_section() -> None:
         )
         feedback_text = st.text_area("Optional feedback")
         feedback_submitted = st.form_submit_button(
-            "Save AI Recommendation Feedback",
+            "Save Feedback",
             use_container_width=True,
         )
 
@@ -1659,10 +1659,10 @@ def home_actions() -> None:
     """Render clear welcome actions."""
     st.markdown("## Welcome")
     st.write("Create a taste profile, tell us what today needs, and meet your drink.")
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
     with col1:
         if st.button(
-            "Standard Recommendation",
+            "Get Recommendation",
             type="primary",
             use_container_width=True,
         ):
@@ -1671,9 +1671,6 @@ def home_actions() -> None:
         if st.button("Create / Load Profile", use_container_width=True):
             _set_flow_step(2)
     with col3:
-        if st.button("✨ AI Recommendation", use_container_width=True, key="home_ai"):
-            _go_to_page("ai")
-    with col4:
         if st.button("View My Profile", use_container_width=True):
             _go_to_page("profile")
 
@@ -1815,7 +1812,7 @@ def guided_context_step() -> None:
                 st.rerun()
 
     with st.expander(
-        "✨ Fine-tune recommendation · Add sleep, stress, weather, or flavor preferences.",
+        "Fine-tune recommendation · Add sleep, stress, weather, or flavor preferences.",
         expanded=False,
     ):
         st.caption("Optional details can make today's recommendation feel more precise.")
@@ -1889,17 +1886,14 @@ def guided_context_step() -> None:
             "likes": likes,
             "dislikes": dislikes,
         }
-        matches, exact_match, relaxed_filters = recommend_with_fallback(
-            drinks=st.session_state.drinks,
-            temperature=st.session_state.today_temperature,
+        matches, candidates, exact_match, relaxed_filters = generate_personalized_recommendation(
             user=user,
-            user_history=get_user_history(user["user_id"]) if user else None,
-            ingredient_preferences=get_ingredient_preferences(user["user_id"]) if user else None,
-            drink_recipes=load_recipes(),
             context=context,
+            temperature=st.session_state.today_temperature,
         )
         st.session_state.consumer_matches = matches
         st.session_state.recommendation_results = matches
+        st.session_state.ai_candidate_drinks = candidates
         st.session_state.guided_exact_match = exact_match
         st.session_state.guided_relaxed_filters = relaxed_filters
         st.session_state.today_context = context
@@ -1925,6 +1919,30 @@ def guided_context_step() -> None:
                     )
                 except Exception:
                     pass
+                if user:
+                    try:
+                        insert_row(
+                            "ai_recommendations",
+                            {
+                                "user_id": user["user_id"],
+                                "created_at": datetime.now(timezone.utc).isoformat(),
+                                "context": context,
+                                "memory_summary": build_user_memory_summary(user["user_id"]),
+                                "recommendation_json": {
+                                    "drink_id": str(top_match["drink_id"]),
+                                    "drink_name": str(top_match["drink_name"]),
+                                    "confidence": int(top_match.get("selector_confidence", 0) or 0),
+                                    "reasoning": str(top_match.get("selector_reasoning", "")),
+                                    "matched_preferences": top_match.get("matched_preferences", []),
+                                    "matched_context": top_match.get("matched_context", []),
+                                },
+                                "rating": None,
+                                "would_order_again": None,
+                                "feedback_text": None,
+                            },
+                        )
+                    except Exception:
+                        pass
             except RuntimeError as error:
                 st.error(str(error))
                 return
@@ -1939,7 +1957,11 @@ def render_guided_recommendation_cards(matches: pd.DataFrame, limit: int = 3) ->
             with st.container(border=True):
                 st.image(get_drink_image(drink.to_dict()), width="stretch")
                 st.markdown(f"### {drink.get('drink_name', 'Recommended drink')}")
-                st.markdown(f"**{_match_percentage(drink.get('recommendation_score'))}% match**")
+                confidence = drink.get("selector_confidence", None)
+                if confidence is not None and str(confidence) != "nan":
+                    st.markdown(f"**{int(float(confidence))}% confidence**")
+                else:
+                    st.markdown(f"**{_match_percentage(drink.get('recommendation_score'))}% match**")
                 st.caption(str(drink.get("recommendation_summary", _drink_description(drink))))
                 if st.button(
                     "View Details",
@@ -1952,8 +1974,8 @@ def render_guided_recommendation_cards(matches: pd.DataFrame, limit: int = 3) ->
 
 
 def guided_recommendation_step() -> None:
-    """Render up to three guided recommendations."""
-    st.markdown("## Your Recommendations")
+    """Render the selected recommendation."""
+    st.markdown("## Your Drink Recommendation")
     matches = st.session_state.consumer_matches
     if matches is None or matches.empty:
         st.warning("No recommendations are ready yet.")
@@ -1965,7 +1987,7 @@ def guided_recommendation_step() -> None:
         relaxed = st.session_state.get("guided_relaxed_filters", [])
         if relaxed:
             st.caption(f"Relaxed filters: {', '.join(relaxed)}")
-    render_guided_recommendation_cards(matches)
+    render_guided_recommendation_cards(matches, limit=1)
 
 
 def _selected_guided_drink() -> pd.Series | None:
@@ -1994,10 +2016,24 @@ def guided_detail_step() -> None:
         st.image(get_drink_image(drink.to_dict()), width="stretch")
     with col2:
         st.header(str(drink.get("drink_name", "Drink details")))
-        st.markdown(f"**{_match_percentage(drink.get('recommendation_score'))}% match**")
+        confidence = drink.get("selector_confidence", None)
+        if confidence is not None and str(confidence) != "nan":
+            st.markdown(f"**{int(float(confidence))}% confidence**")
+        else:
+            st.markdown(f"**{_match_percentage(drink.get('recommendation_score'))}% match**")
         st.write(_drink_description(drink))
         st.subheader("Why this was recommended")
-        st.info(str(drink.get("recommendation_explanation", "Recommended for your taste.")))
+        st.info(str(drink.get("selector_reasoning", drink.get("recommendation_explanation", "Recommended for your taste."))))
+        matched_preferences = drink.get("matched_preferences", [])
+        matched_context = drink.get("matched_context", [])
+        if isinstance(matched_preferences, list) and matched_preferences:
+            st.markdown("**Matched preferences**")
+            for item in matched_preferences:
+                st.write(f"- {item}")
+        if isinstance(matched_context, list) and matched_context:
+            st.markdown("**Matched context**")
+            for item in matched_context:
+                st.write(f"- {item}")
         score_parts = [
             ("Context", drink.get("context_score", 0)),
             ("Profile", drink.get("profile_score", 0)),
@@ -2214,13 +2250,11 @@ def sidebar_navigation() -> None:
     if st.sidebar.button("My Profile", key="nav_profile", use_container_width=True):
         _go_to_page("profile")
     if st.sidebar.button(
-        "Standard Recommendation",
+        "Recommendation",
         key="nav_recommendation",
         use_container_width=True,
     ):
         _start_recommendation()
-    if st.sidebar.button("✨ AI Recommendation", key="nav_ai", use_container_width=True):
-        _go_to_page("ai")
     if st.sidebar.button("Advanced Tools", key="nav_advanced", use_container_width=True):
         _go_to_page("advanced")
 
@@ -2295,8 +2329,6 @@ def main() -> None:
     elif page == "advanced":
         st.markdown("## Advanced Tools")
         advanced_tools_section(expanded=True)
-    elif page == "ai":
-        ai_recommendation_section()
     else:
         guided_flow()
 
