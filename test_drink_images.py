@@ -1,6 +1,28 @@
 """Regression tests for category-safe drink images."""
 
-from drink_images import CURATED_DRINK_IMAGES, get_drink_image
+from drink_images import CURATED_DRINK_IMAGES, FIXED_IMAGE_CATEGORIES, get_drink_image
+
+
+def test_fixed_category_image_set() -> None:
+    assert set(FIXED_IMAGE_CATEGORIES) == {
+        "iced_latte",
+        "hot_latte",
+        "mocha",
+        "americano",
+        "espresso",
+        "cold_brew",
+        "matcha",
+        "chai",
+        "tea",
+        "frappuccino",
+        "refresher",
+        "generic_coffee",
+    }
+    assert len(CURATED_DRINK_IMAGES) == 12
+    for image_url in CURATED_DRINK_IMAGES.values():
+        assert image_url.startswith("https://images.unsplash.com/photo-")
+        assert "source.unsplash" not in image_url
+        assert not image_url.startswith("data:image")
 
 
 def test_peppermint_mocha_uses_mocha_image() -> None:
