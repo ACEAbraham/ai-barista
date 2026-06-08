@@ -89,7 +89,7 @@ def apply_theme() -> None:
 
         .ai-title-section {
             background:
-                linear-gradient(90deg, rgba(74, 38, 8, 0.86), rgba(118, 86, 58, 0.52)),
+                linear-gradient(90deg, rgba(0, 0, 0, 0.62), rgba(0, 0, 0, 0.45)),
                 url("https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?auto=format&fit=crop&w=1600&q=80");
             background-size: cover;
             background-position: center;
@@ -102,17 +102,20 @@ def apply_theme() -> None:
 
         .ai-title-section h1 {
             color: #FFFFFF !important;
-            font-size: 3.8rem;
+            font-size: 4.6rem;
             line-height: 1;
             margin: 0 0 0.6rem 0;
             letter-spacing: 0;
+            font-weight: 800;
+            text-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
         }
 
         .ai-title-section p {
-            color: #FFFDF8 !important;
+            color: rgba(255, 255, 255, 0.9) !important;
             font-size: 1.15rem;
             margin: 0;
             max-width: 560px;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.38);
         }
 
         .home-section-title {
