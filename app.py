@@ -163,7 +163,8 @@ def apply_theme() -> None:
 
         .rail-card-image {
             width: 100%;
-            height: 150px;
+            height: 180px;
+            aspect-ratio: 4 / 3;
             object-fit: cover;
             display: block;
         }
@@ -185,7 +186,7 @@ def apply_theme() -> None:
         }
 
         .favorite-drink-image {
-            height: 145px;
+            height: 180px;
             aspect-ratio: 4 / 3;
         }
 
@@ -210,6 +211,7 @@ def apply_theme() -> None:
         .recommendation-feature-image {
             width: 100%;
             height: 320px;
+            aspect-ratio: 16 / 10;
             object-fit: cover;
             border-radius: 8px;
             border: 1px solid var(--ai-accent);
