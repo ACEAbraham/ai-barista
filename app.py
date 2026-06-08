@@ -89,8 +89,9 @@ def apply_theme() -> None:
 
         .ai-title-section {
             background:
-                linear-gradient(90deg, rgba(0, 0, 0, 0.62), rgba(0, 0, 0, 0.45)),
-                url("https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?auto=format&fit=crop&w=1600&q=80");
+                radial-gradient(circle at 82% 18%, rgba(215, 184, 153, 0.42), transparent 30%),
+                radial-gradient(circle at 12% 88%, rgba(160, 125, 97, 0.35), transparent 34%),
+                linear-gradient(120deg, #4A2608 0%, #76563A 58%, #A07D61 100%);
             background-size: cover;
             background-position: center;
             border: 1px solid var(--ai-accent);
