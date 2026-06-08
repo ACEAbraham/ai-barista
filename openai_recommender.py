@@ -1,4 +1,4 @@
-"""Constrained OpenAI ranking for Smart Match candidate drinks."""
+"""Private OpenAI selector for the single AI Barista recommendation flow."""
 
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -7,46 +7,29 @@ import time
 
 import pandas as pd
 
-from openai_client import build_user_memory_summary, get_openai
+from openai_client import build_user_memory, build_user_memory_summary, get_openai
 from supabase_client import get_supabase, insert_row
 
 
 MODEL = "gpt-5.5"
-AI_RANKING_SCHEMA = {
+RECOMMENDATION_SCHEMA = {
     "type": "object",
     "properties": {
-        "recommendations": {
-            "type": "array",
-            "minItems": 3,
-            "maxItems": 3,
-            "items": {
-                "type": "object",
-                "properties": {
-                    "drink_id": {"type": "string"},
-                    "drink_name": {"type": "string"},
-                    "reasoning": {"type": "string"},
-                    "tradeoffs": {"type": "string"},
-                    "preference_matches": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                    },
-                    "goal_alignment": {"type": "string"},
-                    "confidence": {"type": "integer", "minimum": 0, "maximum": 100},
-                },
-                "required": [
-                    "drink_id",
-                    "drink_name",
-                    "reasoning",
-                    "tradeoffs",
-                    "preference_matches",
-                    "goal_alignment",
-                    "confidence",
-                ],
-                "additionalProperties": False,
-            },
-        }
+        "drink_id": {"type": "string"},
+        "drink_name": {"type": "string"},
+        "confidence": {"type": "integer", "minimum": 0, "maximum": 100},
+        "reasoning": {"type": "string"},
+        "matched_preferences": {"type": "array", "items": {"type": "string"}},
+        "matched_context": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["recommendations"],
+    "required": [
+        "drink_id",
+        "drink_name",
+        "confidence",
+        "reasoning",
+        "matched_preferences",
+        "matched_context",
+    ],
     "additionalProperties": False,
 }
 
@@ -80,14 +63,14 @@ def _snapshot_hash(
 
 
 def _cached_result(user_id: str, request_hash: str) -> dict[str, object] | None:
-    """Load a matching AI ranking generated within the last 24 hours."""
+    """Load a matching recommendation generated within the last 24 hours."""
     client = get_supabase()
     if client is None:
         return None
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
     try:
         response = (
-            client.table("ai_recommendation_cache")
+            client.table("recommendation_cache")
             .select("*")
             .eq("user_id", user_id)
             .eq("request_hash", request_hash)
@@ -109,10 +92,10 @@ def _save_cache(
     context_snapshot: dict[str, object],
     result: dict[str, object],
 ) -> None:
-    """Best-effort save of a reusable AI ranking."""
+    """Best-effort save of a reusable recommendation."""
     try:
         insert_row(
-            "ai_recommendation_cache",
+            "recommendation_cache",
             {
                 "user_id": user_id,
                 "request_hash": request_hash,
@@ -127,7 +110,7 @@ def _save_cache(
 
 
 def _candidate_prompt(candidate_drinks: pd.DataFrame) -> str:
-    """Serialize only candidate drinks that GPT is allowed to select."""
+    """Serialize only the top candidate drinks that may be selected."""
     columns = [
         "drink_id",
         "drink_name",
@@ -137,6 +120,7 @@ def _candidate_prompt(candidate_drinks: pd.DataFrame) -> str:
         "sweetness_level",
         "caffeine_level",
         "calories",
+        "dietary_tags",
         "flavor_profile",
         "recommendation_score",
         "recommendation_explanation",
@@ -149,64 +133,51 @@ def _validate_result(
     result: dict[str, object],
     candidate_drinks: pd.DataFrame,
 ) -> dict[str, object]:
-    """Reject hallucinated, duplicate, or malformed drink selections."""
+    """Reject hallucinated or malformed selections."""
     candidates = candidate_drinks.head(10).copy()
     valid_names = candidates.set_index(candidates["drink_id"].astype(str))[
         "drink_name"
     ].astype(str).to_dict()
-    recommendations = result.get("recommendations", [])
-    if not isinstance(recommendations, list) or len(recommendations) != 3:
-        raise ValueError("AI response did not contain exactly three recommendations.")
-
-    seen: set[str] = set()
-    for recommendation in recommendations:
-        drink_id = str(recommendation.get("drink_id", ""))
-        if drink_id not in valid_names:
-            raise ValueError(f"AI selected an unknown drink ID: {drink_id}")
-        if drink_id in seen:
-            raise ValueError(f"AI selected duplicate drink ID: {drink_id}")
-        recommendation["drink_name"] = valid_names[drink_id]
-        seen.add(drink_id)
+    drink_id = str(result.get("drink_id", ""))
+    if drink_id not in valid_names:
+        raise ValueError(f"Selected drink ID is not in candidate set: {drink_id}")
+    result["drink_name"] = valid_names[drink_id]
+    result["confidence"] = int(result.get("confidence", 0) or 0)
+    result["matched_preferences"] = list(result.get("matched_preferences", []))
+    result["matched_context"] = list(result.get("matched_context", []))
     return result
 
 
-def get_ai_recommendations(
+def select_best_candidate(
     user_profile: dict[str, object],
     candidate_drinks: pd.DataFrame,
-    user_history: pd.DataFrame,
-    current_context: dict[str, object] | None = None,
+    current_context: dict[str, object],
 ) -> tuple[dict[str, object], bool]:
-    """Rank Smart Match candidates with GPT-5.5, returning result and cache status."""
+    """Select the best candidate drink, returning recommendation and cache status."""
     if candidate_drinks.empty:
-        raise ValueError("Smart Match did not produce candidate drinks.")
-    context = current_context or {}
+        raise ValueError("Candidate generator did not return drinks.")
+
     user_id = str(user_profile.get("user_id", ""))
     request_hash, profile_snapshot, context_snapshot = _snapshot_hash(
         user_profile,
-        context,
+        current_context,
         candidate_drinks,
     )
     cached = _cached_result(user_id, request_hash)
     if cached:
         return _validate_result(cached, candidate_drinks), True
 
-    memory = build_user_memory_summary(user_id)
-    history = (
-        user_history.tail(5).to_json(orient="records")
-        if user_history is not None and not user_history.empty
-        else "[]"
-    )
+    memory = build_user_memory(user_id)
+    memory_summary = build_user_memory_summary(user_id)
     prompt = (
-        "You are AI Barista, an experimental explanation layer over Smart Match. "
-        "Rank only the candidate drinks listed below. Select exactly three unique "
-        "candidate drink IDs. Never invent, customize, rename, or select any drink "
-        "outside this list. Reference actual user preferences and today's context. "
-        "Explain reasoning, tradeoffs, preference matches, and goal alignment. Do not "
-        "claim scientific certainty. Return structured JSON only.\n\n"
-        f"PROFILE\n{json.dumps(profile_snapshot, ensure_ascii=True)}\n\n"
-        f"MEMORY\n{memory}\n\nRECENT RATINGS\n{history}\n\n"
+        "Choose the best drink recommendation from the candidate drinks only. "
+        "Do not invent drinks. Do not rename drinks. The selected drink_id must be "
+        "one of the candidate drink_id values. Reference actual user preferences "
+        "and current context. Return JSON only.\n\n"
+        f"USER PROFILE\n{json.dumps(memory['profile'], ensure_ascii=True)}\n\n"
+        f"USER MEMORY SUMMARY\n{memory_summary}\n\n"
         f"CURRENT CONTEXT\n{json.dumps(context_snapshot, ensure_ascii=True)}\n\n"
-        f"SMART MATCH CANDIDATES\n{_candidate_prompt(candidate_drinks)}"
+        f"CANDIDATE DRINKS\n{_candidate_prompt(candidate_drinks)}"
     )
 
     last_error: Exception | None = None
@@ -219,9 +190,9 @@ def get_ai_recommendations(
                 text={
                     "format": {
                         "type": "json_schema",
-                        "name": "ai_barista_candidate_ranking",
+                        "name": "single_drink_recommendation",
                         "strict": True,
-                        "schema": AI_RANKING_SCHEMA,
+                        "schema": RECOMMENDATION_SCHEMA,
                     }
                 },
             )
@@ -232,4 +203,21 @@ def get_ai_recommendations(
             last_error = error
             if attempt == 0:
                 time.sleep(0.4)
-    raise RuntimeError("AI Barista could not rank the Smart Match candidates.") from last_error
+    raise RuntimeError("Could not select a candidate drink.") from last_error
+
+
+def fallback_recommendation(candidate_drinks: pd.DataFrame) -> dict[str, object]:
+    """Use the highest-ranked candidate when the private selector is unavailable."""
+    top = candidate_drinks.iloc[0]
+    return {
+        "drink_id": str(top["drink_id"]),
+        "drink_name": str(top["drink_name"]),
+        "confidence": int(min(100, max(0, round(float(top.get("recommendation_score", 0)) + 60)))),
+        "reasoning": "Recommendation generated using profile matching.",
+        "matched_preferences": [
+            str(top.get("recommendation_summary", "Matches your saved profile and drink history."))
+        ],
+        "matched_context": [
+            str(top.get("recommendation_explanation", "Fits today's recommendation context."))
+        ],
+    }

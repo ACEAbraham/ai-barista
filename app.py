@@ -23,8 +23,8 @@ from ingredient_engine import (
     load_recipes,
     save_custom_drink_recipe,
 )
-from openai_client import build_user_memory_summary, openai_is_configured
-from openai_recommender import get_ai_recommendations
+from openai_client import openai_is_configured
+from openai_recommender import fallback_recommendation, select_best_candidate
 from profile import (
     create_user,
     get_user_history,
@@ -1516,6 +1516,55 @@ def add_ingredient_section() -> None:
         st.session_state.ingredients.sort_values(["category", "ingredient_name"]),
         width="stretch",
     )
+
+
+def generate_personalized_recommendation(
+    user: dict[str, object] | None,
+    context: dict[str, object],
+    temperature: str | None,
+) -> tuple[pd.DataFrame, pd.DataFrame, bool, list[str]]:
+    """Generate top candidates internally, then select one displayed recommendation."""
+    candidates, exact_match, relaxed_filters = recommend_with_fallback(
+        drinks=st.session_state.drinks,
+        temperature=temperature,
+        user=user,
+        user_history=get_user_history(user["user_id"]) if user else None,
+        ingredient_preferences=get_ingredient_preferences(user["user_id"]) if user else None,
+        drink_recipes=load_recipes(),
+        context=context,
+    )
+    if candidates.empty:
+        return candidates, candidates, exact_match, relaxed_filters
+
+    top_candidates = candidates.head(10).copy()
+    selector_result = None
+    cache_used = False
+    if user and openai_is_configured():
+        try:
+            selector_result, cache_used = select_best_candidate(
+                user,
+                top_candidates,
+                context,
+            )
+        except Exception:
+            selector_result = None
+    if selector_result is None:
+        selector_result = fallback_recommendation(top_candidates)
+
+    selected_id = str(selector_result["drink_id"])
+    selected = top_candidates[top_candidates["drink_id"].astype(str) == selected_id].copy()
+    if selected.empty:
+        selected = top_candidates.head(1).copy()
+        selector_result = fallback_recommendation(top_candidates)
+
+    selected.loc[:, "selector_confidence"] = int(selector_result.get("confidence", 0) or 0)
+    selected.loc[:, "selector_reasoning"] = str(selector_result.get("reasoning", ""))
+    selected.loc[:, "matched_preferences"] = [selector_result.get("matched_preferences", [])]
+    selected.loc[:, "matched_context"] = [selector_result.get("matched_context", [])]
+    selected.loc[:, "cache_used"] = cache_used
+    selected.loc[:, "recommendation_summary"] = selected["selector_reasoning"]
+    selected.loc[:, "recommendation_explanation"] = selected["selector_reasoning"]
+    return selected, top_candidates, exact_match, relaxed_filters
 
 
 def rate_drink_section() -> None:

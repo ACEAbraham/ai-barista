@@ -112,6 +112,29 @@ def _drink_names_by_id() -> dict[str, str]:
 
 def build_user_memory_summary(user_id: str) -> str:
     """Build a concise Supabase memory summary for OpenAI reasoning."""
+    memory = build_user_memory(user_id)
+
+    def line(label: str, values: list[object]) -> str:
+        return f"{label}: {', '.join(map(str, values)) if values else 'none yet'}"
+
+    profile = memory["profile"]
+    return "\n".join(
+        [
+            "Profile:",
+            f"- favorite milk: {profile.get('favorite_milk', 'not specified')}",
+            f"- caffeine tolerance: {profile.get('caffeine_tolerance', 'not specified')}",
+            f"- sweetness preference: {profile.get('preferred_sweetness', 'not specified')}",
+            line("Liked ingredients", memory["favorite_ingredients"]),
+            line("Disliked ingredients", memory["disliked_ingredients"]),
+            line("Favorite drinks", memory["favorite_drinks"]),
+            line("Recent ratings", memory["recent_ratings"]),
+            line("Previous recommendations", memory["previous_recommendations"]),
+        ]
+    )
+
+
+def build_user_memory(user_id: str) -> dict[str, object]:
+    """Load structured user memory from Supabase for recommendation context."""
     user = load_user(user_id) or {}
     preferences = get_ingredient_preferences(user_id)
     ratings = get_user_history(user_id)
@@ -120,7 +143,7 @@ def build_user_memory_summary(user_id: str) -> str:
     except Exception:
         favorites = pd.DataFrame()
     recent_sessions = _safe_recent_rows("sessions", user_id, 5, order_column="timestamp")
-    custom_drinks = _safe_recent_rows("custom_drinks", user_id, 5)
+    previous_recommendations = _safe_recent_rows("ai_recommendations", user_id, 5)
     drink_names = _drink_names_by_id()
     ingredient_names = load_ingredients().set_index("ingredient_id")["ingredient_name"].to_dict()
 
@@ -149,14 +172,14 @@ def build_user_memory_summary(user_id: str) -> str:
             .itertuples()
         ]
 
-    high_ratings: list[str] = []
-    low_ratings: list[str] = []
+    recent_rating_items: list[str] = []
     if not ratings.empty:
         recent = ratings.tail(5).copy()
         recent["rating"] = pd.to_numeric(recent["rating"], errors="coerce").fillna(0)
         for row in recent.itertuples():
-            item = f"{drink_names.get(str(row.drink_id), row.drink_id)}: {int(row.rating)}/5"
-            (high_ratings if row.rating >= 4 else low_ratings if row.rating <= 2 else []).append(item)
+            recent_rating_items.append(
+                f"{drink_names.get(str(row.drink_id), row.drink_id)}: {int(row.rating)}/5"
+            )
 
     favorite_names = (
         favorites["drink_name"].dropna().astype(str).head(5).tolist()
@@ -171,26 +194,22 @@ def build_user_memory_summary(user_id: str) -> str:
         )
         for row in recent_sessions
     ]
-    custom_names = [str(row.get("drink_name")) for row in custom_drinks if row.get("drink_name")]
+    recommendation_items = []
+    for row in previous_recommendations:
+        recommendation = row.get("recommendation_json") or {}
+        if isinstance(recommendation, dict):
+            recommendation_items.append(str(recommendation.get("drink_name", "")))
+    recommendation_items = [item for item in recommendation_items if item][:5]
 
-    def line(label: str, values: list[str]) -> str:
-        return f"{label}: {', '.join(values) if values else 'none yet'}"
-
-    return "\n".join(
-        [
-            "Profile:",
-            f"- favorite milk: {user.get('favorite_milk', 'not specified')}",
-            f"- caffeine tolerance: {user.get('caffeine_tolerance', 'not specified')}",
-            f"- sweetness preference: {user.get('preferred_sweetness', 'not specified')}",
-            line("Liked ingredients", liked),
-            line("Disliked ingredients", disliked),
-            line("Recent high-rated drinks", high_ratings),
-            line("Recent low-rated drinks", low_ratings),
-            line("Favorites", favorite_names),
-            line("Recent sessions", session_notes),
-            line("Relevant custom drinks", custom_names),
-        ]
-    )
+    return {
+        "profile": user,
+        "favorite_ingredients": liked,
+        "disliked_ingredients": disliked,
+        "favorite_drinks": favorite_names,
+        "recent_ratings": recent_rating_items,
+        "recent_sessions": session_notes,
+        "previous_recommendations": recommendation_items,
+    }
 
 
 def _available_options(available_drinks: pd.DataFrame) -> str:

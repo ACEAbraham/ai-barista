@@ -197,15 +197,15 @@ def get_ingredient_preferences(user_id: str) -> pd.DataFrame:
 
 def _rating_adjustment(rating: int) -> int:
     """Convert a drink rating into an ingredient preference adjustment."""
-    if rating >= 5:
-        return 3
-    if rating == 4:
+    if rating == 5:
         return 2
+    if rating == 4:
+        return 1
     if rating == 3:
         return 0
     if rating == 2:
-        return -2
-    return -3
+        return -1
+    return -2
 
 
 def update_ingredient_preferences(user_id: str, drink_id: str, rating: int) -> pd.DataFrame:
