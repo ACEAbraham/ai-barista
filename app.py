@@ -476,6 +476,220 @@ def apply_theme() -> None:
             border-radius: 12px;
             padding: 0.35rem;
         }
+
+        @media (min-width: 1025px) {
+            .block-container {
+                max-width: 1280px;
+                padding-left: 2.6rem;
+                padding-right: 2.6rem;
+            }
+
+            .ai-title-section {
+                min-height: 360px;
+                padding: 5rem 3.4rem;
+            }
+
+            .ai-title-section h1 {
+                font-size: 5rem;
+            }
+
+            .rail-card-image,
+            .card-drink-image,
+            .favorite-drink-image {
+                height: 190px;
+            }
+
+            .recommendation-feature-image {
+                height: 360px;
+            }
+
+            .detail-drink-image {
+                height: 420px;
+            }
+        }
+
+        @media (min-width: 769px) and (max-width: 1024px) {
+            .block-container {
+                max-width: 960px;
+                padding-left: 1.4rem;
+                padding-right: 1.4rem;
+            }
+
+            .ai-title-section {
+                min-height: 300px;
+                padding: 3.6rem 2.2rem;
+            }
+
+            .ai-title-section h1 {
+                font-size: 4rem;
+            }
+
+            .ai-title-section p {
+                font-size: 1.05rem;
+                max-width: 500px;
+            }
+
+            .rail-card {
+                min-height: 270px;
+            }
+
+            .rail-card-image,
+            .card-drink-image,
+            .favorite-drink-image {
+                height: 165px;
+            }
+
+            .recommendation-feature-image {
+                height: 300px;
+            }
+
+            .detail-drink-image {
+                height: 320px;
+            }
+
+            .profile-card,
+            .taste-section,
+            .ai-card {
+                border-radius: 14px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .block-container {
+                padding: 1rem 0.9rem 2rem 0.9rem;
+                max-width: 100%;
+            }
+
+            [data-testid="stSidebar"] {
+                background: var(--ai-input);
+                border-right: 0;
+                border-bottom: 1px solid var(--ai-accent);
+            }
+
+            [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+                gap: 0.35rem;
+            }
+
+            .ai-title-section {
+                min-height: 230px;
+                padding: 2.4rem 1.15rem;
+                border-radius: 8px;
+                margin-bottom: 0.9rem;
+                background-position: center;
+            }
+
+            .ai-title-section h1 {
+                font-size: 2.65rem;
+                line-height: 1.04;
+            }
+
+            .ai-title-section p {
+                font-size: 0.98rem;
+                line-height: 1.45;
+                max-width: 100%;
+            }
+
+            .home-section-title {
+                font-size: 1.08rem;
+                margin-top: 1rem;
+            }
+
+            [data-testid="column"] {
+                min-width: 100% !important;
+                width: 100% !important;
+                flex: 1 1 100% !important;
+            }
+
+            .rail-card,
+            .secondary-card,
+            .ai-card,
+            .profile-card,
+            .taste-section,
+            .experimental-card {
+                border-radius: 8px;
+                margin-bottom: 0.85rem;
+                min-height: auto;
+            }
+
+            .rail-card-image,
+            .card-drink-image,
+            .favorite-drink-image {
+                height: 160px;
+            }
+
+            .recommendation-feature-image {
+                height: 220px;
+            }
+
+            .detail-drink-image {
+                height: 230px;
+            }
+
+            .rail-card-body {
+                min-height: auto;
+                padding: 0.7rem;
+            }
+
+            .rail-card-title {
+                height: auto;
+                min-height: 2.3rem;
+                font-size: 0.95rem;
+            }
+
+            .rail-card-meta {
+                height: auto;
+                min-height: 1.8rem;
+            }
+
+            .recommendation-feature {
+                padding: 0.85rem;
+                border-radius: 8px;
+            }
+
+            .ai-card-title,
+            .profile-name {
+                font-size: 1.05rem;
+            }
+
+            .profile-card-header {
+                align-items: flex-start;
+            }
+
+            .profile-avatar {
+                width: 52px;
+                height: 52px;
+                flex-basis: 52px;
+                font-size: 1rem;
+            }
+
+            .profile-badge,
+            .taste-chip {
+                font-size: 0.8rem;
+                padding: 0.32rem 0.58rem;
+            }
+
+            h2 {
+                font-size: 1.35rem !important;
+            }
+
+            h3 {
+                font-size: 1.08rem !important;
+            }
+
+            button:not([role="tab"]),
+            div[data-testid="stFormSubmitButton"] button {
+                width: 100% !important;
+                min-height: 44px;
+                font-size: 0.95rem;
+            }
+
+            input,
+            textarea,
+            [role="combobox"] {
+                min-height: 42px;
+                font-size: 0.95rem !important;
+            }
+        }
         </style>
         """.replace("__HERO_IMAGE_URL__", HERO_IMAGE_URL),
         unsafe_allow_html=True,
