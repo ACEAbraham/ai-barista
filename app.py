@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 from html import escape
+import re
 
 import pandas as pd
 import streamlit as st
@@ -125,8 +126,8 @@ def apply_theme() -> None:
             background: var(--ai-input);
             border: 1px solid var(--ai-accent);
             border-radius: 8px;
-            padding: 0.7rem;
-            min-height: 330px;
+            overflow: hidden;
+            min-height: 292px;
             box-shadow: 0 10px 24px rgba(74, 38, 8, 0.10);
             transition: transform 140ms ease, box-shadow 140ms ease;
         }
@@ -140,14 +141,57 @@ def apply_theme() -> None:
             color: var(--ai-text);
             font-weight: 800;
             font-size: 0.96rem;
-            min-height: 3rem;
-            margin-top: 0.55rem;
+            height: 3rem;
+            line-height: 1.2;
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
         }
 
         .rail-card-meta {
             color: var(--ai-secondary);
             font-size: 0.84rem;
-            margin: 0.35rem 0 0.6rem 0;
+            height: 2.35rem;
+            line-height: 1.25;
+            overflow: hidden;
+            margin-top: 0.35rem;
+        }
+
+        .rail-card-image {
+            width: 100%;
+            height: 150px;
+            object-fit: cover;
+            display: block;
+        }
+
+        .rail-card-body {
+            padding: 0.75rem;
+            min-height: 7.2rem;
+        }
+
+        .recommendation-feature {
+            background: var(--ai-input);
+            border: 1px solid var(--ai-accent);
+            border-radius: 10px;
+            padding: 1rem;
+            box-shadow: 0 18px 42px rgba(74, 38, 8, 0.14);
+        }
+
+        .recommendation-feature-image {
+            width: 100%;
+            height: 320px;
+            object-fit: cover;
+            border-radius: 8px;
+            border: 1px solid var(--ai-accent);
+        }
+
+        .secondary-card {
+            background: var(--ai-input);
+            border: 1px solid var(--ai-accent);
+            border-radius: 8px;
+            padding: 0.75rem;
+            min-height: 250px;
         }
 
         h2, h3 {
@@ -544,6 +588,11 @@ def _chip_html(label: object) -> str:
     return f'<span class="taste-chip">{safe_text(label)}</span>'
 
 
+def key_slug(value: object) -> str:
+    """Return a stable key-safe slug for repeated Streamlit widgets."""
+    return re.sub(r"[^a-zA-Z0-9_]+", "_", str(value)).strip("_").lower() or "item"
+
+
 def _ingredient_chips(
     rows: pd.DataFrame,
     value_column: str | None = None,
@@ -718,10 +767,12 @@ def render_favorites_section(user_id: str) -> None:
     rows = list(favorites.head(6).iterrows())
     for start in range(0, len(rows), 3):
         row_items = rows[start : start + 3]
-        for column, (_, favorite) in zip(st.columns(len(row_items)), row_items):
+        for offset, (column, (_, favorite)) in enumerate(zip(st.columns(len(row_items)), row_items)):
+            card_index = start + offset
+            drink_id = favorite.get("drink_id")
             drink_matches = st.session_state.drinks[
                 st.session_state.drinks["drink_id"].astype(str)
-                == str(favorite.get("drink_id", ""))
+                == str(drink_id)
             ]
             drink = (
                 drink_matches.iloc[0].to_dict()
@@ -737,19 +788,19 @@ def render_favorites_section(user_id: str) -> None:
                     st.markdown(f"**{safe_text(favorite.get('drink_name', 'Favorite drink'))}**")
                     if st.button(
                         "View Details",
-                        key=f"favorite_details_{favorite.get('drink_id')}",
+                        key=f"favorites_profile_{key_slug(drink_id)}_{card_index}_view_details",
                         use_container_width=True,
                     ):
-                        st.session_state.selected_drink_id = favorite.get("drink_id")
+                        st.session_state.selected_drink_id = drink_id
                         st.session_state.selected_drink = drink
                         _set_flow_step(5)
                     if st.button(
                         "Remove",
-                        key=f"favorite_remove_{favorite.get('drink_id')}",
+                        key=f"favorites_profile_{key_slug(drink_id)}_{card_index}_remove",
                         use_container_width=True,
                     ):
                         try:
-                            remove_favorite(user_id, str(favorite.get("drink_id")))
+                            remove_favorite(user_id, str(drink_id))
                         except Exception as error:
                             st.error(f"Could not remove favorite: {error}")
                         else:
@@ -787,6 +838,7 @@ def render_drink_rail(
     score_column: str | None = None,
 ) -> None:
     """Render a horizontal row of drink cards."""
+    section_slug = key_slug(title)
     st.markdown(f'<div class="home-section-title">{safe_text(title)}</div>', unsafe_allow_html=True)
     if drinks is None or drinks.empty:
         st.caption(empty_text)
@@ -794,29 +846,31 @@ def render_drink_rail(
 
     rows = list(drinks.head(limit).iterrows())
     columns = st.columns(len(rows))
-    for column, (_, drink) in zip(columns, rows):
+    for index, (column, (_, drink)) in enumerate(zip(columns, rows)):
         drink_dict = drink.to_dict()
+        drink_id = drink.get("drink_id")
         score_label = None
         if score_column and score_column in drink and not pd.isna(drink.get(score_column)):
             score_label = f"{float(drink.get(score_column)):g}/5 rating"
         with column:
-            st.markdown('<div class="rail-card">', unsafe_allow_html=True)
-            st.image(get_drink_image(drink_dict), width="stretch")
             st.markdown(
-                f'<div class="rail-card-title">{safe_text(drink.get("drink_name", "Drink"))}</div>',
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                f'<div class="rail-card-meta">{safe_text(_rail_meta(drink, score_label))}</div>',
+                f"""
+                <div class="rail-card">
+                    <img class="rail-card-image" src="{safe_text(get_drink_image(drink_dict))}" alt="{safe_text(drink.get("drink_name", "Drink"))}">
+                    <div class="rail-card-body">
+                        <div class="rail-card-title">{safe_text(drink.get("drink_name", "Drink"))}</div>
+                        <div class="rail-card-meta">{safe_text(_rail_meta(drink, score_label))}</div>
+                    </div>
+                </div>
+                """,
                 unsafe_allow_html=True,
             )
             if st.button(
                 "View Details",
-                key=f"{key_prefix}_{drink.get('drink_id')}",
+                key=f"{key_prefix}_{section_slug}_{key_slug(drink_id)}_{index}_view_details",
                 use_container_width=True,
             ):
-                _open_home_drink(drink.get("drink_id"))
-            st.markdown("</div>", unsafe_allow_html=True)
+                _open_home_drink(drink_id)
 
 
 def homepage_rail_data() -> dict[str, pd.DataFrame]:
@@ -1837,8 +1891,34 @@ def _start_recommendation() -> None:
     _set_flow_step(3 if st.session_state.current_user else 2)
 
 
+def profile_gate_actions() -> None:
+    """Render the Netflix-style entry gate before a profile is loaded."""
+    st.markdown(
+        """
+        <section class="ai-title-section">
+            <h1>AI Barista</h1>
+            <p>Personalized drink recommendations powered by your taste profile.</p>
+        </section>
+        """,
+        unsafe_allow_html=True,
+    )
+    col1, col2, _ = st.columns([1, 1, 2])
+    with col1:
+        if st.button("Create Profile", type="primary", use_container_width=True):
+            st.session_state.profile_mode = "create"
+            _go_to_page("profile")
+    with col2:
+        if st.button("Load Profile", use_container_width=True):
+            st.session_state.profile_mode = "load"
+            _go_to_page("profile")
+
+
 def home_actions() -> None:
     """Render the premium coffee-shop homepage."""
+    if not st.session_state.current_user:
+        profile_gate_actions()
+        return
+
     st.markdown(
         """
         <section class="ai-title-section">
@@ -1979,16 +2059,81 @@ def guided_profile_step() -> None:
             st.rerun()
 
 
+def render_profile_create_load(after: str = "profile") -> None:
+    """Render create/load profile forms and stay on the requested page after success."""
+    create_col, load_col = st.columns(2)
+    with create_col:
+        if st.button("Create Profile", key=f"{after}_choose_create_profile", use_container_width=True):
+            st.session_state.profile_mode = "create"
+            st.rerun()
+    with load_col:
+        if st.button("Load Profile", key=f"{after}_choose_load_profile", use_container_width=True):
+            st.session_state.profile_mode = "load"
+            st.rerun()
+
+    if st.session_state.profile_mode == "create":
+        with st.form(f"{after}_create_profile_form"):
+            name = st.text_input("Name")
+            favorite_milk = st.selectbox("Favorite milk", list_options(st.session_state.drinks, "milk"))
+            caffeine_tolerance = st.selectbox(
+                "Caffeine tolerance",
+                list_options(st.session_state.drinks, "caffeine_level"),
+            )
+            preferred_sweetness = st.selectbox(
+                "Sweetness preference",
+                list_options(st.session_state.drinks, "sweetness_level"),
+            )
+            submitted = st.form_submit_button("Create Profile", type="primary", use_container_width=True)
+        if submitted:
+            if not name.strip():
+                st.error("Please enter your name.")
+                return
+            try:
+                user = create_user(
+                    name=name.strip(),
+                    favorite_milk=favorite_milk,
+                    favorite_temperature="no preference",
+                    caffeine_tolerance=caffeine_tolerance,
+                    preferred_sweetness=preferred_sweetness,
+                )
+            except RuntimeError as error:
+                st.error(str(error))
+                return
+            st.session_state.current_user = user
+            refresh_data()
+            st.session_state.flow_message = "Profile created successfully."
+            if after == "home":
+                _go_to_page("home")
+            else:
+                _go_to_page("profile")
+
+    elif st.session_state.profile_mode == "load":
+        with st.form(f"{after}_load_profile_form"):
+            lookup = st.text_input("Profile ID or name")
+            submitted = st.form_submit_button("Load Profile", type="primary", use_container_width=True)
+        if submitted:
+            user = load_user_by_id_or_name(lookup)
+            if user is None:
+                st.error("No profile matched that ID or name.")
+                return
+            st.session_state.current_user = user
+            st.session_state.flow_message = f"Welcome back, {user['name']}."
+            if after == "home":
+                _go_to_page("home")
+            else:
+                _go_to_page("profile")
+
+
 def guided_context_step() -> None:
     """Render today's visual context choices."""
     st.markdown("## Today's Context")
     st.write("What are you looking for today?")
     goals = [
-        ("⚡ Energy", "energy"),
-        ("🎯 Focus", "focus"),
-        ("😌 Comfort", "comfort"),
-        ("🏋️ Workout", "workout"),
-        ("🍰 Treat", "treat"),
+        ("Energy", "energy"),
+        ("Focus", "focus"),
+        ("Comfort", "comfort"),
+        ("Workout", "workout"),
+        ("Treat", "treat"),
     ]
     goal_columns = st.columns(len(goals))
     for column, (label, value) in zip(goal_columns, goals):
@@ -2000,9 +2145,9 @@ def guided_context_step() -> None:
 
     st.write("Hot or iced?")
     temperatures = [
-        ("🧊 Iced", "iced"),
-        ("🔥 Hot", "hot"),
-        ("🤷 No Preference", None),
+        ("Iced", "iced"),
+        ("Hot", "hot"),
+        ("No Preference", None),
     ]
     temperature_columns = st.columns(3)
     for column, (label, value) in zip(temperature_columns, temperatures):
@@ -2158,10 +2303,14 @@ def guided_context_step() -> None:
         _set_flow_step(4)
 
 
-def render_guided_recommendation_cards(matches: pd.DataFrame, limit: int = 3) -> None:
+def render_guided_recommendation_cards(
+    matches: pd.DataFrame,
+    limit: int = 3,
+    key_prefix: str = "guided_recommendation",
+) -> None:
     """Render recommendation cards that advance into the guided detail step."""
     rows = list(matches.head(limit).iterrows())
-    for column, (_, drink) in zip(st.columns(len(rows)), rows):
+    for index, (column, (_, drink)) in enumerate(zip(st.columns(len(rows)), rows)):
         with column:
             with st.container(border=True):
                 st.image(get_drink_image(drink.to_dict()), width="stretch")
@@ -2174,12 +2323,85 @@ def render_guided_recommendation_cards(matches: pd.DataFrame, limit: int = 3) ->
                 st.caption(str(drink.get("recommendation_summary", _drink_description(drink))))
                 if st.button(
                     "View Details",
-                    key=f"guided_details_{drink.get('drink_id')}",
+                    key=f"{key_prefix}_{key_slug(drink.get('drink_id'))}_{index}_view_details",
                     use_container_width=True,
                 ):
                     st.session_state.selected_drink_id = drink.get("drink_id")
                     st.session_state.selected_drink = drink.to_dict()
                     _set_flow_step(5)
+
+
+def render_best_recommendation(drink: pd.Series) -> None:
+    """Render the primary recommendation as the largest visual element."""
+    confidence = drink.get("selector_confidence", None)
+    if confidence is not None and str(confidence) != "nan":
+        score_text = f"{int(float(confidence))}% confidence"
+    else:
+        score_text = f"{_match_percentage(drink.get('recommendation_score'))}% match"
+    explanation = str(
+        drink.get(
+            "selector_reasoning",
+            drink.get("recommendation_summary", "Selected from your profile and today's context."),
+        )
+    )
+    col1, col2 = st.columns([1.25, 1])
+    with col1:
+        st.markdown(
+            f'<img class="recommendation-feature-image" src="{safe_text(get_drink_image(drink.to_dict()))}" alt="{safe_text(drink.get("drink_name", "Drink"))}">',
+            unsafe_allow_html=True,
+        )
+    with col2:
+        st.markdown(
+            f"""
+            <div class="recommendation-feature">
+                <div class="ai-card-meta">Best match</div>
+                <div class="ai-card-title">{safe_text(drink.get("drink_name", "Recommended drink"))}</div>
+                <div class="ai-score">{safe_text(score_text)}</div>
+                <div class="ai-explanation">Best match because {safe_text(explanation)}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.button(
+            "View Details",
+            key=f"best_recommendation_{key_slug(drink.get('drink_id'))}_0_view_details",
+            use_container_width=True,
+        ):
+            st.session_state.selected_drink_id = drink.get("drink_id")
+            st.session_state.selected_drink = drink.to_dict()
+            _set_flow_step(5)
+
+
+def render_secondary_recommendations(candidates: pd.DataFrame, selected_id: object) -> None:
+    """Render smaller secondary recommendations from the internal candidate list."""
+    if candidates is None or candidates.empty:
+        return
+    secondary = candidates[candidates["drink_id"].astype(str) != str(selected_id)].head(3)
+    if secondary.empty:
+        return
+    st.markdown("### Also Close")
+    columns = st.columns(len(secondary))
+    for index, (column, (_, drink)) in enumerate(zip(columns, secondary.iterrows())):
+        reason = str(drink.get("recommendation_summary", drink.get("recommendation_explanation", "")))
+        with column:
+            st.markdown(
+                f"""
+                <div class="secondary-card">
+                    <img class="rail-card-image" src="{safe_text(get_drink_image(drink.to_dict()))}" alt="{safe_text(drink.get("drink_name", "Drink"))}">
+                    <div class="rail-card-title">{safe_text(drink.get("drink_name", "Drink"))}</div>
+                    <div class="rail-card-meta">Also close because {safe_text(reason)}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            if st.button(
+                "View Details",
+                key=f"secondary_recommendation_{key_slug(drink.get('drink_id'))}_{index}_view_details",
+                use_container_width=True,
+            ):
+                st.session_state.selected_drink_id = drink.get("drink_id")
+                st.session_state.selected_drink = drink.to_dict()
+                _set_flow_step(5)
 
 
 def guided_recommendation_step() -> None:
@@ -2196,7 +2418,12 @@ def guided_recommendation_step() -> None:
         relaxed = st.session_state.get("guided_relaxed_filters", [])
         if relaxed:
             st.caption(f"Relaxed filters: {', '.join(relaxed)}")
-    render_guided_recommendation_cards(matches, limit=1)
+    best = matches.iloc[0]
+    render_best_recommendation(best)
+    render_secondary_recommendations(
+        st.session_state.get("ai_candidate_drinks"),
+        best.get("drink_id"),
+    )
 
 
 def _selected_guided_drink() -> pd.Series | None:
@@ -2299,7 +2526,11 @@ def guided_detail_step() -> None:
 
     st.subheader("Similar drinks")
     similar = find_similar_drinks(st.session_state.drinks, drink, limit=3)
-    render_guided_recommendation_cards(similar, limit=3)
+    render_guided_recommendation_cards(
+        similar,
+        limit=3,
+        key_prefix=f"similar_{key_slug(drink.get('drink_id'))}",
+    )
 
 
 def guided_rating_step() -> None:
@@ -2437,15 +2668,7 @@ def my_profile_page() -> None:
             """,
             unsafe_allow_html=True,
         )
-        create_col, load_col = st.columns(2)
-        with create_col:
-            if st.button("Create Profile", use_container_width=True):
-                st.session_state.profile_mode = "create"
-                _set_flow_step(2)
-        with load_col:
-            if st.button("Load Profile", use_container_width=True):
-                st.session_state.profile_mode = "load"
-                _set_flow_step(2)
+        render_profile_create_load(after="profile")
         return
 
     st.markdown("### Profile Dashboard")
@@ -2476,14 +2699,15 @@ def sidebar_navigation() -> None:
         _go_to_page("home")
     if st.sidebar.button("My Profile", key="nav_profile", use_container_width=True):
         _go_to_page("profile")
-    if st.sidebar.button(
-        "Recommendation",
-        key="nav_recommendation",
-        use_container_width=True,
-    ):
-        _start_recommendation()
-    if st.sidebar.button("Advanced Tools", key="nav_advanced", use_container_width=True):
-        _go_to_page("advanced")
+    if st.session_state.current_user:
+        if st.sidebar.button(
+            "Recommendation",
+            key="nav_recommendation",
+            use_container_width=True,
+        ):
+            _start_recommendation()
+        if st.sidebar.button("Advanced Tools", key="nav_advanced", use_container_width=True):
+            _go_to_page("advanced")
 
 
 def advanced_tools_section(expanded: bool = False) -> None:
@@ -2540,6 +2764,9 @@ def main() -> None:
         )
 
     page = st.session_state.selected_page
+    if not st.session_state.current_user and page in {"advanced", "guided"}:
+        page = "home"
+        st.session_state.selected_page = "home"
     if page == "home":
         if st.session_state.home_view == "details" and st.session_state.selected_drink_id:
             drink_detail_section()
@@ -2553,7 +2780,7 @@ def main() -> None:
     else:
         guided_flow()
 
-    if page != "advanced":
+    if st.session_state.current_user and page != "advanced":
         advanced_tools_section(expanded=False)
 
 
