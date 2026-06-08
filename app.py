@@ -10,7 +10,7 @@ import streamlit as st
 from analytics import track_recommendation_event
 from customization import log_recommendation_session, log_session
 from drink_database import list_options, load_drinks
-from drink_images import get_drink_image
+from drink_images import get_drink_image, get_drink_image_alt
 from favorites import get_user_favorites, remove_favorite, save_favorite
 from ingredient_engine import (
     SUPPORTED_CATEGORIES,
@@ -166,6 +166,32 @@ def apply_theme() -> None:
             height: 150px;
             object-fit: cover;
             display: block;
+        }
+
+        .card-drink-image,
+        .favorite-drink-image,
+        .detail-drink-image {
+            width: 100%;
+            object-fit: cover;
+            display: block;
+            border-radius: 8px;
+            border: 1px solid var(--ai-accent);
+            background: var(--ai-input);
+        }
+
+        .card-drink-image {
+            height: 180px;
+            aspect-ratio: 4 / 3;
+        }
+
+        .favorite-drink-image {
+            height: 145px;
+            aspect-ratio: 4 / 3;
+        }
+
+        .detail-drink-image {
+            height: 360px;
+            aspect-ratio: 16 / 10;
         }
 
         .rail-card-body {
@@ -580,6 +606,34 @@ def safe_text(value: object, fallback: str = "") -> str:
     return escape(str(value))
 
 
+def _drink_dict(drink: object) -> dict[str, object]:
+    """Return drink data as a plain dictionary for shared render helpers."""
+    if hasattr(drink, "to_dict"):
+        return drink.to_dict()
+    if isinstance(drink, dict):
+        return drink
+    return {}
+
+
+def drink_image_url(drink: object) -> str:
+    """Resolve the shared drink image URL."""
+    return get_drink_image(_drink_dict(drink))
+
+
+def drink_image_alt(drink: object) -> str:
+    """Resolve the shared drink image alt text."""
+    return get_drink_image_alt(_drink_dict(drink))
+
+
+def drink_image_html(drink: object, css_class: str) -> str:
+    """Render a consistently styled drink image."""
+    return (
+        f'<img class="{safe_text(css_class)}" '
+        f'src="{safe_text(drink_image_url(drink))}" '
+        f'alt="{safe_text(drink_image_alt(drink))}">'
+    )
+
+
 def _initials(name: object) -> str:
     """Return up to two initials for a profile avatar."""
     parts = [part for part in str(name).strip().split() if part]
@@ -675,6 +729,7 @@ def render_recommendation_cards(matches: pd.DataFrame, limit: int = 10) -> None:
         st.markdown(
             f"""
             <div class="ai-card">
+                {drink_image_html(drink, "card-drink-image")}
                 <div class="ai-card-title">{name}</div>
                 <div class="ai-card-meta">
                     {drink_id} &nbsp;|&nbsp; ${float(price):.2f} &nbsp;|&nbsp;
@@ -715,9 +770,9 @@ def render_consumer_cards(matches: pd.DataFrame, limit: int = 3) -> None:
     for column, (_, drink) in zip(columns, rows):
         with column:
             with st.container(border=True):
-                st.image(
-                    get_drink_image(drink.to_dict()),
-                    width="stretch",
+                st.markdown(
+                    drink_image_html(drink, "card-drink-image"),
+                    unsafe_allow_html=True,
                 )
                 st.markdown(f"### {drink.get('drink_name', 'Recommended drink')}")
                 st.markdown(
@@ -787,7 +842,10 @@ def render_favorites_section(user_id: str) -> None:
             )
             with column:
                 with st.container(border=True):
-                    st.image(get_drink_image(drink), width="stretch")
+                    st.markdown(
+                        drink_image_html(drink, "favorite-drink-image"),
+                        unsafe_allow_html=True,
+                    )
                     st.markdown(f"**{safe_text(favorite.get('drink_name', 'Favorite drink'))}**")
                     if st.button(
                         "View Details",
@@ -859,7 +917,7 @@ def render_drink_rail(
             st.markdown(
                 f"""
                 <div class="rail-card">
-                    <img class="rail-card-image" src="{safe_text(get_drink_image(drink_dict))}" alt="{safe_text(drink.get("drink_name", "Drink"))}">
+                    {drink_image_html(drink_dict, "rail-card-image")}
                     <div class="rail-card-body">
                         <div class="rail-card-title">{safe_text(drink.get("drink_name", "Drink"))}</div>
                         <div class="rail-card-meta">{safe_text(_rail_meta(drink, score_label))}</div>
@@ -975,7 +1033,10 @@ def drink_detail_section() -> None:
 
     col1, col2 = st.columns([1, 1.25])
     with col1:
-        st.image(get_drink_image(drink.to_dict()), width="stretch")
+        st.markdown(
+            drink_image_html(drink, "detail-drink-image"),
+            unsafe_allow_html=True,
+        )
     with col2:
         st.header(str(drink.get("drink_name", "Drink details")))
         st.markdown(f"**{_match_percentage(drink.get('recommendation_score'))}% match**")
@@ -2316,7 +2377,10 @@ def render_guided_recommendation_cards(
     for index, (column, (_, drink)) in enumerate(zip(st.columns(len(rows)), rows)):
         with column:
             with st.container(border=True):
-                st.image(get_drink_image(drink.to_dict()), width="stretch")
+                st.markdown(
+                    drink_image_html(drink, "card-drink-image"),
+                    unsafe_allow_html=True,
+                )
                 st.markdown(f"### {drink.get('drink_name', 'Recommended drink')}")
                 confidence = drink.get("selector_confidence", None)
                 if confidence is not None and str(confidence) != "nan":
@@ -2350,7 +2414,7 @@ def render_best_recommendation(drink: pd.Series) -> None:
     col1, col2 = st.columns([1.25, 1])
     with col1:
         st.markdown(
-            f'<img class="recommendation-feature-image" src="{safe_text(get_drink_image(drink.to_dict()))}" alt="{safe_text(drink.get("drink_name", "Drink"))}">',
+            drink_image_html(drink, "recommendation-feature-image"),
             unsafe_allow_html=True,
         )
     with col2:
@@ -2390,7 +2454,7 @@ def render_secondary_recommendations(candidates: pd.DataFrame, selected_id: obje
             st.markdown(
                 f"""
                 <div class="secondary-card">
-                    <img class="rail-card-image" src="{safe_text(get_drink_image(drink.to_dict()))}" alt="{safe_text(drink.get("drink_name", "Drink"))}">
+                    {drink_image_html(drink, "rail-card-image")}
                     <div class="rail-card-title">{safe_text(drink.get("drink_name", "Drink"))}</div>
                     <div class="rail-card-meta">Also close because {safe_text(reason)}</div>
                 </div>
@@ -2452,7 +2516,10 @@ def guided_detail_step() -> None:
 
     col1, col2 = st.columns([1, 1.2])
     with col1:
-        st.image(get_drink_image(drink.to_dict()), width="stretch")
+        st.markdown(
+            drink_image_html(drink, "detail-drink-image"),
+            unsafe_allow_html=True,
+        )
     with col2:
         st.header(str(drink.get("drink_name", "Drink details")))
         confidence = drink.get("selector_confidence", None)
