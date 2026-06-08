@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 from html import escape
 import re
+from urllib.parse import quote
 
 import pandas as pd
 import streamlit as st
@@ -238,6 +239,26 @@ def apply_theme() -> None:
             border-color: var(--ai-accent) !important;
         }
 
+        input:not(:focus),
+        textarea:not(:focus),
+        div[data-baseweb="select"] input:not(:focus) {
+            caret-color: transparent !important;
+        }
+
+        input:focus,
+        textarea:focus,
+        div[data-baseweb="select"] input:focus {
+            caret-color: auto !important;
+        }
+
+        div[data-baseweb="select"] input:not(:focus) {
+            cursor: default !important;
+        }
+
+        div[data-baseweb="select"]:focus-within input {
+            cursor: text !important;
+        }
+
         input::placeholder,
         textarea::placeholder {
             color: var(--ai-secondary) !important;
@@ -446,6 +467,55 @@ def apply_theme() -> None:
             font-size: 0.92rem;
         }
 
+        .category-grid {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 0.9rem;
+            margin: 0.65rem 0 1.6rem 0;
+        }
+
+        .category-card {
+            display: block;
+            overflow: hidden;
+            min-height: 250px;
+            background: var(--ai-input);
+            border: 1px solid var(--ai-accent);
+            border-radius: 10px;
+            text-decoration: none !important;
+            box-shadow: 0 10px 24px rgba(74, 38, 8, 0.10);
+            transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+        }
+
+        .category-card:hover {
+            transform: translateY(-2px);
+            border-color: var(--ai-button);
+            box-shadow: 0 15px 32px rgba(74, 38, 8, 0.16);
+        }
+
+        .category-card-image {
+            width: 100%;
+            height: 145px;
+            object-fit: cover;
+            display: block;
+        }
+
+        .category-card-body {
+            padding: 0.82rem;
+        }
+
+        .category-card-title {
+            color: var(--ai-text);
+            font-size: 1rem;
+            font-weight: 850;
+            margin-bottom: 0.35rem;
+        }
+
+        .category-card-description {
+            color: var(--ai-secondary);
+            font-size: 0.85rem;
+            line-height: 1.35;
+        }
+
         div[data-testid="stExpander"] {
             background: var(--ai-input);
             border: 1px solid var(--ai-button);
@@ -551,6 +621,10 @@ def apply_theme() -> None:
             .taste-section,
             .ai-card {
                 border-radius: 14px;
+            }
+
+            .category-grid {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
             }
         }
 
@@ -688,6 +762,31 @@ def apply_theme() -> None:
             [role="combobox"] {
                 min-height: 42px;
                 font-size: 0.95rem !important;
+            }
+
+            .category-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 0.7rem;
+            }
+
+            .category-card {
+                min-height: 218px;
+            }
+
+            .category-card-image {
+                height: 118px;
+            }
+
+            .category-card-body {
+                padding: 0.68rem;
+            }
+
+            .category-card-title {
+                font-size: 0.92rem;
+            }
+
+            .category-card-description {
+                font-size: 0.78rem;
             }
         }
         </style>
@@ -1148,6 +1247,102 @@ def render_drink_rail(
                 use_container_width=True,
             ):
                 _open_home_drink(drink_id)
+
+
+CATEGORY_CARDS = [
+    {
+        "key": "espresso",
+        "name": "Espresso",
+        "description": "Bold espresso-forward drinks with a clean coffee finish.",
+        "sample": {"drink_name": "Espresso", "base": "Espresso"},
+    },
+    {
+        "key": "lattes",
+        "name": "Lattes",
+        "description": "Creamy milk-based coffee drinks for smooth everyday sipping.",
+        "sample": {"drink_name": "Hot Latte", "base": "Latte", "temperature": "hot"},
+    },
+    {
+        "key": "refreshers",
+        "name": "Refreshers",
+        "description": "Bright, chilled fruit-style drinks for a lighter pick-me-up.",
+        "sample": {"drink_name": "Refresher", "base": "Refresher", "temperature": "iced"},
+    },
+    {
+        "key": "matcha",
+        "name": "Matcha",
+        "description": "Earthy green tea drinks with a smooth cafe feel.",
+        "sample": {"drink_name": "Matcha Latte", "base": "Matcha Latte"},
+    },
+    {
+        "key": "cold_brew",
+        "name": "Cold Brew",
+        "description": "Chilled, slow-steeped coffee drinks with a bold profile.",
+        "sample": {"drink_name": "Cold Brew", "base": "Cold Brew", "temperature": "iced"},
+    },
+]
+
+
+def _category_matches(drinks: pd.DataFrame, category_key: str) -> pd.DataFrame:
+    """Return drinks matching a homepage discovery category."""
+    text = (
+        drinks.get("drink_name", pd.Series(dtype=str)).astype(str).str.lower()
+        + " "
+        + drinks.get("base", pd.Series(dtype=str)).astype(str).str.lower()
+    )
+    if category_key == "espresso":
+        shots = pd.to_numeric(drinks.get("espresso_shots", 0), errors="coerce").fillna(0)
+        mask = text.str.contains("espresso|americano|cappuccino", na=False) | (shots > 0)
+    elif category_key == "lattes":
+        mask = text.str.contains("latte", na=False) & ~text.str.contains(
+            "matcha|chai",
+            na=False,
+        )
+    elif category_key == "refreshers":
+        mask = text.str.contains("refresher", na=False)
+    elif category_key == "matcha":
+        mask = text.str.contains("matcha", na=False)
+    elif category_key == "cold_brew":
+        mask = text.str.contains("cold brew", na=False)
+    else:
+        mask = pd.Series(False, index=drinks.index)
+    return drinks[mask].copy()
+
+
+def render_category_explorer(drinks: pd.DataFrame) -> None:
+    """Render clickable category cards and selected category drinks."""
+    st.markdown('<div class="home-section-title">Explore Categories</div>', unsafe_allow_html=True)
+    cards = []
+    for category in CATEGORY_CARDS:
+        sample = category["sample"]
+        href = f"?category={quote(category['key'])}"
+        cards.append(
+            f"""
+            <a class="category-card" href="{href}">
+                {drink_image_html(sample, "category-card-image")}
+                <div class="category-card-body">
+                    <div class="category-card-title">{safe_text(category["name"])}</div>
+                    <div class="category-card-description">{safe_text(category["description"])}</div>
+                </div>
+            </a>
+            """
+        )
+    st.markdown(
+        f'<div class="category-grid">{"".join(cards)}</div>',
+        unsafe_allow_html=True,
+    )
+
+    selected_category = st.query_params.get("category")
+    category = next((item for item in CATEGORY_CARDS if item["key"] == selected_category), None)
+    if category:
+        matches = _category_matches(drinks, category["key"])
+        render_drink_rail(
+            f"{category['name']} Picks",
+            matches,
+            f"category_{category['key']}",
+            empty_text=f"No {category['name'].lower()} drinks are available yet.",
+        )
+        st.markdown('<a class="ai-card-meta" href="?">Clear category</a>', unsafe_allow_html=True)
 
 
 def homepage_rail_data() -> dict[str, pd.DataFrame]:
@@ -2242,6 +2437,7 @@ def home_actions() -> None:
         empty_text="Save favorite drinks and they will appear here.",
     )
     render_drink_rail("Custom Creations", rails["custom"], "rail_custom")
+    render_category_explorer(st.session_state.drinks)
 
 
 def guided_welcome_step() -> None:
