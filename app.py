@@ -10,7 +10,7 @@ import streamlit as st
 from analytics import track_recommendation_event
 from customization import log_recommendation_session, log_session
 from drink_database import list_options, load_drinks
-from drink_images import get_drink_image, get_drink_image_alt
+from drink_images import HERO_IMAGE_URL, get_drink_image, get_drink_image_alt
 from favorites import get_user_favorites, remove_favorite, save_favorite
 from ingredient_engine import (
     SUPPORTED_CATEGORIES,
@@ -89,9 +89,8 @@ def apply_theme() -> None:
 
         .ai-title-section {
             background:
-                radial-gradient(circle at 82% 18%, rgba(215, 184, 153, 0.42), transparent 30%),
-                radial-gradient(circle at 12% 88%, rgba(160, 125, 97, 0.35), transparent 34%),
-                linear-gradient(120deg, #4A2608 0%, #76563A 58%, #A07D61 100%);
+                linear-gradient(90deg, rgba(0, 0, 0, 0.68), rgba(0, 0, 0, 0.44)),
+                url("__HERO_IMAGE_URL__");
             background-size: cover;
             background-position: center;
             border: 1px solid var(--ai-accent);
@@ -112,7 +111,7 @@ def apply_theme() -> None:
         }
 
         .ai-title-section p {
-            color: rgba(255, 255, 255, 0.9) !important;
+            color: rgba(255, 253, 248, 0.94) !important;
             font-size: 1.15rem;
             margin: 0;
             max-width: 560px;
@@ -478,7 +477,7 @@ def apply_theme() -> None:
             padding: 0.35rem;
         }
         </style>
-        """,
+        """.replace("__HERO_IMAGE_URL__", HERO_IMAGE_URL),
         unsafe_allow_html=True,
     )
 

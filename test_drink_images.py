@@ -7,6 +7,9 @@ def test_peppermint_mocha_uses_mocha_image() -> None:
     drink = {"drink_name": "Grande Iced Extra Nonfat Mocha with Peppermint"}
 
     assert get_drink_image(drink) == CURATED_DRINK_IMAGES["mocha"]
+    assert get_drink_image(drink).startswith("https://images.unsplash.com/photo-")
+    assert not get_drink_image(drink).startswith("data:image")
+    assert "photo-1579888944880" not in get_drink_image(drink)
 
 
 def test_flavor_words_do_not_override_mocha() -> None:
