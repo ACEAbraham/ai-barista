@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 from html import escape
+import logging
 import re
 from urllib.parse import quote
 
@@ -38,6 +39,9 @@ from profile import (
 from profile import load_users as load_supabase_users
 from recommender import find_similar_drinks, recommend_with_fallback
 from supabase_client import insert_row, supabase_is_configured, update_rows
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def apply_theme() -> None:
@@ -131,7 +135,7 @@ def apply_theme() -> None:
             border: 1px solid var(--ai-accent);
             border-radius: 8px;
             overflow: hidden;
-            min-height: 292px;
+            min-height: 326px;
             box-shadow: 0 10px 24px rgba(74, 38, 8, 0.10);
             transition: transform 140ms ease, box-shadow 140ms ease;
         }
@@ -198,7 +202,7 @@ def apply_theme() -> None:
 
         .rail-card-body {
             padding: 0.75rem;
-            min-height: 7.2rem;
+            min-height: 9rem;
         }
 
         .recommendation-feature {
@@ -317,6 +321,81 @@ def apply_theme() -> None:
             padding: 1.15rem 1.25rem;
             margin: 0.85rem 0;
             box-shadow: 0 12px 30px rgba(74, 38, 8, 0.08);
+        }
+
+        .card-ingredients,
+        .ingredient-chip-row,
+        .detail-badge-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.35rem;
+            margin-top: 0.55rem;
+        }
+
+        .ingredient-chip,
+        .detail-badge {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 999px;
+            border: 1px solid var(--ai-accent);
+            background: var(--ai-input);
+            color: var(--ai-text);
+            padding: 0.26rem 0.56rem;
+            font-size: 0.78rem;
+            font-weight: 750;
+            line-height: 1.1;
+        }
+
+        .ingredient-chip.muted {
+            color: var(--ai-secondary);
+            font-weight: 650;
+        }
+
+        .detail-badge {
+            background: var(--ai-section);
+            font-size: 0.84rem;
+        }
+
+        .detail-section {
+            background: var(--ai-input);
+            border: 1px solid var(--ai-accent);
+            border-radius: 12px;
+            padding: 0.9rem;
+            margin: 0.75rem 0;
+        }
+
+        .detail-section-title {
+            color: var(--ai-text);
+            font-weight: 850;
+            margin-bottom: 0.55rem;
+        }
+
+        .ingredient-card-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.75rem;
+            margin: 0.8rem 0;
+        }
+
+        .ingredient-card {
+            background: var(--ai-input);
+            border: 1px solid var(--ai-accent);
+            border-radius: 10px;
+            padding: 0.85rem;
+            min-height: 110px;
+            box-shadow: 0 8px 18px rgba(74, 38, 8, 0.08);
+        }
+
+        .ingredient-card-title {
+            color: var(--ai-text);
+            font-weight: 850;
+            margin-bottom: 0.35rem;
+        }
+
+        .ingredient-card-meta {
+            color: var(--ai-secondary);
+            font-size: 0.84rem;
+            line-height: 1.35;
         }
 
         .ai-card-title {
@@ -626,6 +705,10 @@ def apply_theme() -> None:
             .category-grid {
                 grid-template-columns: repeat(3, minmax(0, 1fr));
             }
+
+            .ingredient-card-grid {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+            }
         }
 
         @media (max-width: 768px) {
@@ -788,6 +871,10 @@ def apply_theme() -> None:
             .category-card-description {
                 font-size: 0.78rem;
             }
+
+            .ingredient-card-grid {
+                grid-template-columns: repeat(1, minmax(0, 1fr));
+            }
         }
         </style>
         """.replace("__HERO_IMAGE_URL__", HERO_IMAGE_URL),
@@ -858,6 +945,10 @@ def initialize_state() -> None:
         st.session_state.today_context = {}
     if "flow_message" not in st.session_state:
         st.session_state.flow_message = None
+    if "recommendation_fallback_message" not in st.session_state:
+        st.session_state.recommendation_fallback_message = None
+    if "duplicate_profile_to_load" not in st.session_state:
+        st.session_state.duplicate_profile_to_load = None
 
 
 def save_warning() -> None:
@@ -947,6 +1038,90 @@ def drink_image_html(drink: object, css_class: str) -> str:
         f'src="{safe_text(drink_image_url(drink))}" '
         f'alt="{safe_text(drink_image_alt(drink))}">'
     )
+
+
+def _split_tags(value: object, limit: int = 6) -> list[str]:
+    """Split comma-ish display values into clean labels."""
+    if value is None or pd.isna(value):
+        return []
+    parts = re.split(r"[,;/|]", str(value))
+    return [part.strip() for part in parts if part.strip() and part.strip().lower() != "nan"][:limit]
+
+
+def _drink_ingredients(drink: object, limit: int = 5) -> list[str]:
+    """Return compact ingredient labels for cards and details."""
+    data = _drink_dict(drink)
+    labels = []
+    for field in ("base", "milk", "syrup", "toppings"):
+        value = str(data.get(field, "")).strip()
+        if value and value.lower() not in {"nan", "none", "no syrup", "no milk"}:
+            labels.append(value)
+    if not labels:
+        labels = _split_tags(data.get("flavor_profile", ""), limit=limit)
+    return labels[:limit]
+
+
+def chips_html(items: list[object], css_class: str = "ingredient-chip") -> str:
+    """Render small rounded chips."""
+    if not items:
+        return '<span class="ingredient-chip muted">Ingredients coming soon</span>'
+    return "".join(f'<span class="{css_class}">{safe_text(item)}</span>' for item in items)
+
+
+def drink_badges_html(drink: object) -> str:
+    """Render drink detail badges."""
+    data = _drink_dict(drink)
+    badges = [
+        f"Caffeine: {data.get('caffeine_level', 'unknown')}",
+        f"Sweetness: {data.get('sweetness_level', 'unknown')}",
+        f"{data.get('calories', 'N/A')} calories",
+    ]
+    badges.extend(_split_tags(data.get("dietary_tags", ""), limit=4))
+    return chips_html(badges, "detail-badge")
+
+
+def profile_name_exists(name: str) -> dict[str, object] | None:
+    """Return an existing profile with the same name, if present."""
+    query = str(name).strip().lower()
+    if not query:
+        return None
+    users = load_supabase_users()
+    if users.empty:
+        return None
+    matches = users[users["name"].astype(str).str.strip().str.lower() == query]
+    return None if matches.empty else matches.iloc[0].to_dict()
+
+
+def render_duplicate_profile_prompt(destination: str = "profile") -> None:
+    """Render a persistent duplicate-profile load prompt."""
+    existing_user = st.session_state.get("duplicate_profile_to_load")
+    if not existing_user:
+        return
+    st.warning("Profile already exists. Load this profile instead?")
+    if st.button(
+        f"Load {existing_user.get('name', 'profile')}",
+        key=f"{destination}_load_duplicate_{key_slug(existing_user.get('user_id', 'profile'))}",
+        use_container_width=True,
+    ):
+        st.session_state.current_user = existing_user
+        st.session_state.duplicate_profile_to_load = None
+        st.session_state.flow_message = f"Welcome back, {existing_user['name']}."
+        if destination == "guided":
+            st.session_state.flow_step = 3
+            st.session_state.current_step = 3
+            st.session_state.selected_page = "guided"
+            st.rerun()
+        _go_to_page(destination)
+
+
+def _safe_float(value: object, fallback: float = 0.0) -> float:
+    """Convert display values to floats without crashing on missing data."""
+    try:
+        if pd.isna(value):
+            return fallback
+        return float(value)
+    except (TypeError, ValueError):
+        return fallback
 
 
 def _initials(name: object) -> str:
@@ -1184,6 +1359,58 @@ def render_favorites_section(user_id: str) -> None:
                             st.rerun()
 
 
+def render_recently_rated_section(user_id: str, limit: int = 6) -> None:
+    """Render recently rated drinks as compact cards."""
+    st.markdown("### Recently Rated Drinks")
+    history = get_user_history(user_id)
+    if history.empty:
+        st.info("Rate a few drinks and they will appear here.")
+        return
+    drinks = history.tail(limit).merge(st.session_state.drinks, on="drink_id", how="left")
+    if "drink_name_x" in drinks.columns:
+        drinks["drink_name"] = drinks["drink_name_y"].fillna(drinks["drink_name_x"])
+    render_drink_rail("Recently Rated Drinks", drinks, "profile_recent", limit=limit, score_column="rating")
+
+
+def render_custom_creations_section(limit: int = 6) -> None:
+    """Render custom drinks as compact cards."""
+    custom = st.session_state.drinks[
+        st.session_state.drinks["drink_id"].astype(str).str.startswith("CUS-")
+    ].head(limit)
+    render_drink_rail(
+        "Custom Creations",
+        custom,
+        "profile_custom",
+        limit=limit,
+        empty_text="Create a custom drink and it will appear here.",
+    )
+
+
+def render_ingredient_cards(ingredients: pd.DataFrame, limit: int = 24) -> None:
+    """Render ingredients as styled cards instead of a raw table."""
+    if ingredients.empty:
+        st.info("No ingredients found.")
+        return
+    cards = []
+    for _, ingredient in ingredients.head(limit).iterrows():
+        calories = _safe_float(ingredient.get("calories", 0))
+        caffeine = _safe_float(ingredient.get("caffeine", 0))
+        price = _safe_float(ingredient.get("price", 0))
+        cards.append(
+            f"""
+            <div class="ingredient-card">
+                <div class="ingredient-card-title">{safe_text(ingredient.get("ingredient_name", "Ingredient"))}</div>
+                <div class="ingredient-card-meta">
+                    {safe_text(ingredient.get("category", "category"))}<br>
+                    {calories:g} cal Â· {caffeine:g} mg caffeine<br>
+                    ${price:.2f} per {safe_text(ingredient.get("default_unit", "serving"))}
+                </div>
+            </div>
+            """
+        )
+    st.html(f'<div class="ingredient-card-grid">{"".join(cards)}</div>')
+
+
 def _open_home_drink(drink_id: object) -> None:
     """Open a drink from a homepage rail in the shared detail view."""
     st.session_state.selected_drink_id = drink_id
@@ -1236,6 +1463,7 @@ def render_drink_rail(
                     <div class="rail-card-body">
                         <div class="rail-card-title">{safe_text(drink.get("drink_name", "Drink"))}</div>
                         <div class="rail-card-meta">{safe_text(_rail_meta(drink, score_label))}</div>
+                        <div class="card-ingredients">{chips_html(_drink_ingredients(drink_dict, limit=3))}</div>
                     </div>
                 </div>
                 """,
@@ -1327,10 +1555,7 @@ def render_category_explorer(drinks: pd.DataFrame) -> None:
             </a>
             """
         )
-    st.markdown(
-        f'<div class="category-grid">{"".join(cards)}</div>',
-        unsafe_allow_html=True,
-    )
+    st.html(f'<div class="category-grid">{"".join(cards)}</div>')
 
     selected_category = st.query_params.get("category")
     category = next((item for item in CATEGORY_CARDS if item["key"] == selected_category), None)
@@ -1460,12 +1685,18 @@ def drink_detail_section() -> None:
                 )
             )
         )
-        st.write(f"**Ingredients:** {drink.get('flavor_profile', 'Not available')}")
-        st.write(
-            f"**Caffeine:** {drink.get('caffeine_level', 'unknown')}  \n"
-            f"**Calories:** {drink.get('calories', 'N/A')}  \n"
-            f"**Sweetness:** {drink.get('sweetness_level', 'unknown')}  \n"
-            f"**Dietary tags:** {drink.get('dietary_tags', 'none listed')}"
+        st.markdown(
+            f"""
+            <div class="detail-section">
+                <div class="detail-section-title">Ingredients</div>
+                <div class="ingredient-chip-row">{chips_html(_drink_ingredients(drink, limit=6))}</div>
+            </div>
+            <div class="detail-section">
+                <div class="detail-section-title">Drink profile</div>
+                <div class="detail-badge-row">{drink_badges_html(drink)}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
         user = st.session_state.current_user
@@ -1899,9 +2130,9 @@ def ai_recommendation_section() -> None:
 def ingredient_list_section() -> None:
     """Render the current ingredient catalog."""
     st.subheader("Ingredient List")
-    st.dataframe(
+    render_ingredient_cards(
         st.session_state.ingredients.sort_values(["category", "ingredient_name"]),
-        width="stretch",
+        limit=80,
     )
 
 
@@ -1909,6 +2140,7 @@ def create_profile_section() -> None:
     """Render profile creation UI."""
     st.subheader("Create Profile")
     drinks = st.session_state.drinks
+    render_duplicate_profile_prompt("profile")
 
     with st.form("create_profile_form"):
         name = st.text_input("Name")
@@ -1930,6 +2162,11 @@ def create_profile_section() -> None:
     if submitted:
         if not name.strip():
             st.error("Please enter a name.")
+            return
+        existing_user = profile_name_exists(name)
+        if existing_user:
+            st.session_state.duplicate_profile_to_load = existing_user
+            st.rerun()
             return
         try:
             user = create_user(
@@ -2113,10 +2350,16 @@ def custom_drink_section() -> None:
     ingredients = st.session_state.ingredients
 
     with st.expander("Ingredient catalog", expanded=False):
-        st.dataframe(ingredients, width="stretch")
+        render_ingredient_cards(ingredients.sort_values(["category", "ingredient_name"]), limit=24)
 
     with st.form("custom_drink_form"):
         drink_name = st.text_input("Custom drink name")
+        caffeine_level = st.selectbox("Caffeine level", ["none", "low", "medium", "high"])
+        roast_blend = st.selectbox("Roast / blend type", ["house", "blonde", "medium", "dark", "decaf"])
+        sweetness_level = st.selectbox("Sweetness", ["unsweetened", "light", "classic", "extra"])
+        calories_override = st.number_input("Calories", min_value=0.0, max_value=1200.0, value=0.0)
+        dietary_tags = st.text_input("Dietary tags", placeholder="vegan, dairy-free, nut-free")
+        uploaded_image = st.file_uploader("Optional drink image", type=["png", "jpg", "jpeg"])
         recipe_items = ingredient_recipe_builder(ingredients)
         context = session_context("custom")
         rate_now = st.checkbox("Rate this custom drink now", value=False)
@@ -2141,6 +2384,18 @@ def custom_drink_section() -> None:
         except ValueError as error:
             st.error(str(error))
             return
+        custom_drink["caffeine_level"] = caffeine_level
+        custom_drink["sweetness_level"] = sweetness_level
+        if calories_override > 0:
+            custom_drink["calories"] = calories_override
+        if dietary_tags.strip():
+            custom_drink["dietary_tags"] = dietary_tags.strip()
+        if roast_blend:
+            custom_drink["flavor_profile"] = (
+                f"{custom_drink.get('flavor_profile', '')}, {roast_blend} roast/blend"
+            ).strip(", ")
+        if uploaded_image is not None:
+            st.info("Image upload is preview-only for now. The custom drink was saved with category imagery.")
         exists, duplicate_reason = custom_drink_exists(custom_drink["drink_name"], recipe_items)
         if exists:
             st.warning(duplicate_reason)
@@ -2221,9 +2476,9 @@ def add_ingredient_section() -> None:
         st.caption(f"Saved {ingredient['ingredient_name']} as {ingredient['ingredient_id']}.")
 
     st.markdown("### Ingredient list")
-    st.dataframe(
+    render_ingredient_cards(
         st.session_state.ingredients.sort_values(["category", "ingredient_name"]),
-        width="stretch",
+        limit=48,
     )
 
 
@@ -2248,6 +2503,7 @@ def generate_personalized_recommendation(
     top_candidates = candidates.head(10).copy()
     selector_result = None
     cache_used = False
+    used_profile_matching = False
     if user and openai_is_configured():
         try:
             selector_result, cache_used = select_best_candidate(
@@ -2255,10 +2511,13 @@ def generate_personalized_recommendation(
                 top_candidates,
                 context,
             )
-        except Exception:
+        except Exception as error:
+            LOGGER.warning("OpenAI selector failed; using profile matching fallback: %s", error)
+            used_profile_matching = True
             selector_result = None
     if selector_result is None:
         selector_result = fallback_recommendation(top_candidates)
+        used_profile_matching = True
 
     selected_id = str(selector_result["drink_id"])
     selected = top_candidates[top_candidates["drink_id"].astype(str) == selected_id].copy()
@@ -2271,6 +2530,7 @@ def generate_personalized_recommendation(
     selected.loc[:, "matched_preferences"] = [selector_result.get("matched_preferences", [])]
     selected.loc[:, "matched_context"] = [selector_result.get("matched_context", [])]
     selected.loc[:, "cache_used"] = cache_used
+    selected.loc[:, "used_profile_matching"] = used_profile_matching
     selected.loc[:, "recommendation_summary"] = selected["selector_reasoning"]
     selected.loc[:, "recommendation_explanation"] = selected["selector_reasoning"]
     return selected, top_candidates, exact_match, relaxed_filters
@@ -2460,6 +2720,7 @@ def guided_profile_step() -> None:
             st.rerun()
 
     if st.session_state.profile_mode == "create":
+        render_duplicate_profile_prompt("guided")
         with st.form("guided_create_profile"):
             name = st.text_input("Name")
             favorite_milk = st.selectbox(
@@ -2490,6 +2751,11 @@ def guided_profile_step() -> None:
         if submitted:
             if not name.strip():
                 st.error("Please enter your name.")
+                return
+            existing_user = profile_name_exists(name)
+            if existing_user:
+                st.session_state.duplicate_profile_to_load = existing_user
+                st.rerun()
                 return
             try:
                 user = create_user(
@@ -2548,6 +2814,7 @@ def render_profile_create_load(after: str = "profile") -> None:
             st.rerun()
 
     if st.session_state.profile_mode == "create":
+        render_duplicate_profile_prompt("home" if after == "home" else "profile")
         with st.form(f"{after}_create_profile_form"):
             name = st.text_input("Name")
             favorite_milk = st.selectbox("Favorite milk", list_options(st.session_state.drinks, "milk"))
@@ -2563,6 +2830,11 @@ def render_profile_create_load(after: str = "profile") -> None:
         if submitted:
             if not name.strip():
                 st.error("Please enter your name.")
+                return
+            existing_user = profile_name_exists(name)
+            if existing_user:
+                st.session_state.duplicate_profile_to_load = existing_user
+                st.rerun()
                 return
             try:
                 user = create_user(
@@ -2727,6 +2999,12 @@ def guided_context_step() -> None:
         st.session_state.guided_exact_match = exact_match
         st.session_state.guided_relaxed_filters = relaxed_filters
         st.session_state.today_context = context
+        if not matches.empty and bool(matches.iloc[0].get("used_profile_matching", False)):
+            st.session_state.recommendation_fallback_message = (
+                "Recommendation generated using profile matching."
+            )
+        else:
+            st.session_state.recommendation_fallback_message = None
         if not matches.empty and supabase_is_configured():
             try:
                 top_match = matches.iloc[0]
@@ -2800,6 +3078,10 @@ def render_guided_recommendation_cards(
                 else:
                     st.markdown(f"**{_match_percentage(drink.get('recommendation_score'))}% match**")
                 st.caption(str(drink.get("recommendation_summary", _drink_description(drink))))
+                st.markdown(
+                    f'<div class="card-ingredients">{chips_html(_drink_ingredients(drink, limit=3))}</div>',
+                    unsafe_allow_html=True,
+                )
                 if st.button(
                     "View Details",
                     key=f"{key_prefix}_{key_slug(drink.get('drink_id'))}_{index}_view_details",
@@ -2836,6 +3118,7 @@ def render_best_recommendation(drink: pd.Series) -> None:
                 <div class="ai-card-meta">Best match</div>
                 <div class="ai-card-title">{safe_text(drink.get("drink_name", "Recommended drink"))}</div>
                 <div class="ai-score">{safe_text(score_text)}</div>
+                <div class="card-ingredients">{chips_html(_drink_ingredients(drink, limit=4))}</div>
                 <div class="ai-explanation">Best match because {safe_text(explanation)}</div>
             </div>
             """,
@@ -2869,6 +3152,7 @@ def render_secondary_recommendations(candidates: pd.DataFrame, selected_id: obje
                     {drink_image_html(drink, "rail-card-image")}
                     <div class="rail-card-title">{safe_text(drink.get("drink_name", "Drink"))}</div>
                     <div class="rail-card-meta">Also close because {safe_text(reason)}</div>
+                    <div class="card-ingredients">{chips_html(_drink_ingredients(drink, limit=3))}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -2892,6 +3176,8 @@ def guided_recommendation_step() -> None:
         if st.button("Back to Today's Context"):
             _set_flow_step(3)
         return
+    if st.session_state.get("recommendation_fallback_message"):
+        st.info(st.session_state.recommendation_fallback_message)
     if not st.session_state.get("guided_exact_match", True):
         st.info("No exact match found, but this is close.")
         relaxed = st.session_state.get("guided_relaxed_filters", [])
@@ -2963,12 +3249,18 @@ def guided_detail_step() -> None:
             "Score: "
             + " + ".join(f"{label} {int(float(value or 0))}" for label, value in score_parts)
         )
-        st.write(f"**Ingredients:** {drink.get('flavor_profile', 'Not available')}")
-        st.write(
-            f"**Caffeine:** {drink.get('caffeine_level', 'unknown')}  \n"
-            f"**Calories:** {drink.get('calories', 'N/A')}  \n"
-            f"**Sweetness:** {drink.get('sweetness_level', 'unknown')}  \n"
-            f"**Dietary tags:** {drink.get('dietary_tags', 'none listed')}"
+        st.markdown(
+            f"""
+            <div class="detail-section">
+                <div class="detail-section-title">Ingredients</div>
+                <div class="ingredient-chip-row">{chips_html(_drink_ingredients(drink, limit=6))}</div>
+            </div>
+            <div class="detail-section">
+                <div class="detail-section-title">Drink profile</div>
+                <div class="detail-badge-row">{drink_badges_html(drink)}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
         rate_col, another_col = st.columns(2)
         with rate_col:
@@ -3106,6 +3398,8 @@ def guided_profile_summary_step() -> None:
     render_profile_card(user)
     render_taste_profile_cards(user["user_id"])
     render_favorites_section(user["user_id"])
+    render_recently_rated_section(user["user_id"])
+    render_custom_creations_section()
     if st.button("Get another recommendation", type="primary", use_container_width=True):
         _set_flow_step(3)
 
@@ -3171,6 +3465,8 @@ def my_profile_page() -> None:
 
     render_taste_profile_cards(user["user_id"])
     render_favorites_section(user["user_id"])
+    render_recently_rated_section(user["user_id"])
+    render_custom_creations_section()
 
 
 def sidebar_navigation() -> None:
