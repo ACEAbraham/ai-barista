@@ -193,11 +193,20 @@ create table drink_feedback (
   feedback_text text not null,
   created_at timestamptz not null default now()
 );
+
+create table user_progress (
+  user_id text primary key,
+  xp integer not null default 0,
+  last_seen_date date,
+  updated_at timestamptz not null default now()
+);
 ```
 
 The `favorites` table is required for Favorites. Favorites are available from
 drink details and the profile page, and the unique `user_id, drink_id`
 constraint prevents duplicates. The `drink_feedback` table remains optional.
+The `user_progress` table powers the sidebar Barista Progress mug; if it is not
+available locally, the app falls back to `progress.csv`.
 
 In Streamlit Cloud, add these secrets:
 
