@@ -136,7 +136,11 @@ def apply_theme() -> None:
             border: 1px solid var(--ai-accent);
             border-radius: 8px;
             overflow: hidden;
-            min-height: 326px;
+            height: 388px;
+            min-height: 388px;
+            max-height: 388px;
+            display: flex;
+            flex-direction: column;
             box-shadow: 0 10px 24px rgba(74, 38, 8, 0.10);
             transition: transform 140ms ease, box-shadow 140ms ease;
         }
@@ -169,10 +173,13 @@ def apply_theme() -> None:
 
         .rail-card-image {
             width: 100%;
-            height: 180px;
+            height: 178px;
+            min-height: 178px;
+            max-height: 178px;
             aspect-ratio: 4 / 3;
             object-fit: cover;
             display: block;
+            flex: 0 0 178px;
         }
 
         .card-drink-image,
@@ -203,7 +210,18 @@ def apply_theme() -> None:
 
         .rail-card-body {
             padding: 0.75rem;
-            min-height: 9rem;
+            height: 210px;
+            min-height: 210px;
+            max-height: 210px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .rail-card-action-space {
+            flex: 1 1 auto;
+            min-height: 2.75rem;
+            border-top: 1px solid rgba(160, 125, 97, 0.22);
+            margin-top: 0.65rem;
         }
 
         .recommendation-feature {
@@ -263,10 +281,10 @@ def apply_theme() -> None:
             background: var(--ai-input);
             border: 1px solid var(--ai-accent);
             border-radius: 8px;
-            padding: 0.75rem;
-            height: 392px;
-            min-height: 392px;
-            max-height: 392px;
+            padding: 0;
+            height: 388px;
+            min-height: 388px;
+            max-height: 388px;
             overflow: hidden;
             display: flex;
             flex-direction: column;
@@ -274,10 +292,10 @@ def apply_theme() -> None:
         }
 
         .secondary-card .rail-card-image {
-            height: 150px;
-            flex: 0 0 150px;
-            border-radius: 6px;
-            border: 1px solid var(--ai-accent);
+            height: 100%;
+            flex: none;
+            border-radius: 0;
+            border: 0;
         }
 
         .recommendation-card-title {
@@ -308,8 +326,85 @@ def apply_theme() -> None:
         .recommendation-card-chips {
             height: 4.1rem;
             min-height: 4.1rem;
+            max-height: 4.1rem;
             overflow: hidden;
             margin-top: 0.5rem;
+        }
+
+        .card-ingredients {
+            height: 4.1rem;
+            min-height: 4.1rem;
+            max-height: 4.1rem;
+            overflow: hidden;
+        }
+
+        .card-image-zone {
+            height: 178px;
+            min-height: 178px;
+            max-height: 178px;
+            flex: 0 0 178px;
+            overflow: hidden;
+        }
+
+        .card-image-zone img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .card-content-zone {
+            padding: 0.75rem;
+            height: 210px;
+            min-height: 210px;
+            max-height: 210px;
+            display: grid;
+            grid-template-rows: 2.45rem 2.25rem 4.1rem 2.35rem 2.75rem;
+            gap: 0.45rem;
+        }
+
+        .card-title-zone,
+        .card-meta-zone,
+        .card-chip-zone,
+        .card-description-zone,
+        .card-actions-zone {
+            overflow: hidden;
+        }
+
+        .card-title-zone {
+            color: var(--ai-text);
+            font-weight: 850;
+            font-size: 0.96rem;
+            line-height: 1.22;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+
+        .card-meta-zone {
+            color: var(--ai-secondary);
+            font-size: 0.82rem;
+            line-height: 1.32;
+        }
+
+        .card-chip-zone {
+            display: flex;
+            flex-wrap: wrap;
+            align-content: flex-start;
+            gap: 0.35rem;
+        }
+
+        .card-description-zone {
+            color: var(--ai-secondary);
+            font-size: 0.84rem;
+            line-height: 1.35;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+
+        .card-actions-zone {
+            border-top: 1px solid rgba(160, 125, 97, 0.22);
         }
 
         .recommendation-button-spacer {
@@ -608,96 +703,113 @@ def apply_theme() -> None:
         }
 
         .progress-card {
-            background: var(--ai-input);
-            border: 1px solid var(--ai-accent);
-            border-radius: 12px;
-            padding: 0.9rem;
-            margin-top: 1.2rem;
-            box-shadow: 0 10px 24px rgba(74, 38, 8, 0.10);
+            background: transparent;
+            border-top: 1px solid rgba(118, 86, 58, 0.35);
+            border-radius: 0;
+            padding: 0.95rem 0.1rem 0.25rem 0.1rem;
+            margin-top: 1.35rem;
+            box-shadow: none;
         }
 
         .progress-name {
             color: var(--ai-text);
-            font-weight: 850;
-            font-size: 0.98rem;
+            font-weight: 900;
+            font-size: 0.92rem;
             line-height: 1.2;
         }
 
         .progress-title {
             color: var(--ai-button);
-            font-weight: 900;
-            font-size: 1.05rem;
-            margin-top: 0.6rem;
+            font-weight: 850;
+            font-size: 0.88rem;
+            margin-top: 0.32rem;
         }
 
         .progress-level {
             color: var(--ai-secondary);
-            font-size: 0.86rem;
+            font-size: 0.78rem;
             font-weight: 700;
-            margin-bottom: 0.7rem;
+            margin-top: 0.28rem;
         }
 
         .mug-wrap {
             display: flex;
+            flex-direction: column;
             align-items: center;
-            gap: 0.75rem;
-            margin: 0.55rem 0 0.7rem 0;
+            gap: 0.35rem;
+            margin: 0.62rem 0 0.35rem 0;
         }
 
         .coffee-mug {
             position: relative;
-            width: 74px;
-            height: 58px;
-            border: 4px solid var(--ai-button);
-            border-radius: 0 0 18px 18px;
-            background: #FFFDF8;
-            overflow: hidden;
-            flex: 0 0 74px;
+            width: 88px;
+            height: 54px;
+            border: 2px solid var(--ai-button);
+            border-top: 0;
+            border-radius: 0 0 20px 20px;
+            background: linear-gradient(180deg, rgba(255, 253, 248, 0.78), rgba(208, 188, 168, 0.38));
+            overflow: visible;
+            box-shadow: inset 0 -5px 10px rgba(74, 38, 8, 0.08);
         }
 
         .coffee-mug::after {
             content: "";
             position: absolute;
-            right: -20px;
+            right: -18px;
             top: 12px;
             width: 22px;
-            height: 26px;
-            border: 4px solid var(--ai-button);
+            height: 25px;
+            border: 2px solid var(--ai-button);
             border-left: 0;
             border-radius: 0 14px 14px 0;
             background: transparent;
         }
 
+        .coffee-mug::before {
+            content: "";
+            position: absolute;
+            left: -9px;
+            right: -17px;
+            bottom: -9px;
+            height: 7px;
+            border-radius: 999px;
+            background: rgba(160, 125, 97, 0.34);
+        }
+
         .coffee-fill {
             position: absolute;
-            left: 0;
-            right: 0;
+            left: 5px;
+            right: 5px;
             bottom: 0;
             height: var(--fill);
-            background: linear-gradient(180deg, #A07D61 0%, #4A2608 100%);
-            border-top: 2px solid rgba(255, 253, 248, 0.55);
+            max-height: calc(100% - 5px);
+            background: linear-gradient(180deg, #A07D61 0%, #76563A 48%, #4A2608 100%);
+            border-radius: 10px 10px 16px 16px;
+            box-shadow: inset 0 2px 0 rgba(255, 253, 248, 0.25);
         }
 
         .progress-percent {
             color: var(--ai-text);
             font-weight: 850;
-            font-size: 0.9rem;
-            line-height: 1.25;
+            font-size: 0.8rem;
+            line-height: 1.1;
+            white-space: nowrap;
         }
 
         .progress-xp {
             color: var(--ai-secondary);
-            font-size: 0.78rem;
-            margin-top: 0.18rem;
+            font-size: 0.82rem;
+            font-weight: 850;
+            margin-top: 0.32rem;
         }
 
         .progress-stats {
-            display: grid;
-            gap: 0.35rem;
-            margin-top: 0.75rem;
-            color: var(--ai-text);
-            font-size: 0.82rem;
-            font-weight: 700;
+            display: block;
+            margin-top: 0.45rem;
+            color: var(--ai-secondary);
+            font-size: 0.76rem;
+            font-weight: 800;
+            line-height: 1.35;
         }
 
         .ai-card-title {
@@ -1052,13 +1164,36 @@ def apply_theme() -> None:
             }
 
             .rail-card {
-                min-height: 270px;
+                height: 360px;
+                min-height: 360px;
+                max-height: 360px;
+            }
+
+            .secondary-card {
+                height: 360px;
+                min-height: 360px;
+                max-height: 360px;
             }
 
             .rail-card-image,
             .card-drink-image,
             .favorite-drink-image {
                 height: 165px;
+            }
+
+            .card-image-zone {
+                height: 165px;
+                min-height: 165px;
+                max-height: 165px;
+                flex-basis: 165px;
+            }
+
+            .card-content-zone {
+                height: 195px;
+                min-height: 195px;
+                max-height: 195px;
+                grid-template-rows: 2.35rem 2.05rem 3.75rem 2.1rem 2.45rem;
+                gap: 0.38rem;
             }
 
             .recommendation-feature-image {
@@ -1150,24 +1285,36 @@ def apply_theme() -> None:
             .experimental-card {
                 border-radius: 8px;
                 margin-bottom: 0.85rem;
-                min-height: auto;
+            }
+
+            .rail-card {
+                height: 356px;
+                min-height: 356px;
+                max-height: 356px;
             }
 
             .secondary-card {
-                height: 360px;
-                min-height: 360px;
-                max-height: 360px;
+                height: 356px;
+                min-height: 356px;
+                max-height: 356px;
             }
 
             .secondary-card .rail-card-image {
-                height: 145px;
-                flex-basis: 145px;
+                height: 100%;
+                flex-basis: auto;
             }
 
             .rail-card-image,
             .card-drink-image,
             .favorite-drink-image {
                 height: 160px;
+            }
+
+            .card-image-zone {
+                height: 160px;
+                min-height: 160px;
+                max-height: 160px;
+                flex-basis: 160px;
             }
 
             .recommendation-feature-image {
@@ -1179,19 +1326,30 @@ def apply_theme() -> None:
             }
 
             .rail-card-body {
-                min-height: auto;
+                height: 196px;
+                min-height: 196px;
+                max-height: 196px;
                 padding: 0.7rem;
             }
 
+            .card-content-zone {
+                height: 196px;
+                min-height: 196px;
+                max-height: 196px;
+                padding: 0.7rem;
+                grid-template-rows: 2.3rem 2.2rem 3.75rem 2.2rem 2.35rem;
+                gap: 0.36rem;
+            }
+
             .rail-card-title {
-                height: auto;
+                height: 2.3rem;
                 min-height: 2.3rem;
                 font-size: 0.95rem;
             }
 
             .rail-card-meta {
-                height: auto;
-                min-height: 1.8rem;
+                height: 2.2rem;
+                min-height: 2.2rem;
             }
 
             .recommendation-feature {
@@ -1596,8 +1754,8 @@ def _list_field(value: object) -> list[object]:
     return _split_tags(value, limit=6)
 
 
-def score_cards_html(drink: object) -> str:
-    """Render score breakdown cards."""
+def render_score_breakdown(drink: object) -> None:
+    """Render scoring details with native Streamlit cards so no raw HTML can leak."""
     data = _drink_dict(drink)
     parts = [
         ("Context", data.get("context_score", 0)),
@@ -1606,17 +1764,12 @@ def score_cards_html(drink: object) -> str:
         ("Past ratings", data.get("past_rating_score", 0)),
         ("Close match", data.get("fallback_similarity_score", 0)),
     ]
-    cards = []
-    for label, value in parts:
-        cards.append(
-            f"""
-            <div class="detail-score-card">
-                <div class="detail-score-label">{safe_text(label)}</div>
-                <div class="detail-score-value">{int(_safe_float(value))}</div>
-            </div>
-            """
-        )
-    return f'<div class="detail-score-grid">{"".join(cards)}</div>'
+    columns = st.columns(len(parts))
+    for column, (label, value) in zip(columns, parts):
+        with column:
+            with st.container(border=True):
+                st.caption(label)
+                st.markdown(f"**{int(_safe_float(value))}**")
 
 
 def detail_summary_html(drink: object) -> str:
@@ -1662,23 +1815,50 @@ def detail_summary_html(drink: object) -> str:
     """
 
 
-def also_try_cards_html(drinks: pd.DataFrame, limit: int = 3) -> str:
-    """Render compact similar-drink cards under the hero image."""
+def render_drink_card_grid(
+    drinks: pd.DataFrame,
+    key_prefix: str,
+    limit: int = 3,
+    mode: str = "home",
+) -> None:
+    """Render reusable compact drink cards with safe HTML rendering and native buttons."""
     if drinks is None or drinks.empty:
-        return '<div class="taste-empty">Similar drinks will appear here.</div>'
-    cards = []
-    for _, drink in drinks.head(limit).iterrows():
-        cards.append(
-            f"""
-            <div class="also-try-card">
-                {drink_image_html(drink, "also-try-image")}
-                <div class="also-try-body">
-                    <div class="also-try-title">{safe_text(drink.get("drink_name", "Drink"))}</div>
+        st.info("Similar drinks will appear here.")
+        return
+
+    rows = list(drinks.head(limit).iterrows())
+    columns = st.columns(len(rows))
+    for index, (column, (_, drink)) in enumerate(zip(columns, rows)):
+        drink_dict = drink.to_dict()
+        drink_id = drink.get("drink_id")
+        with column:
+            st.markdown(
+                f"""
+                <div class="rail-card">
+                    <div class="card-image-zone">{drink_image_html(drink_dict, "rail-card-image")}</div>
+                    <div class="card-content-zone">
+                        <div class="card-title-zone">{safe_text(drink.get("drink_name", "Drink"))}</div>
+                        <div class="card-meta-zone">{safe_text(_rail_meta(drink))}</div>
+                        <div class="card-chip-zone">{limited_chips_html(_drink_ingredients(drink_dict, limit=6), limit=3)}</div>
+                        <div class="card-description-zone">{safe_text(_drink_description(drink_dict))}</div>
+                        <div class="card-actions-zone"></div>
+                    </div>
                 </div>
-            </div>
-            """
-        )
-    return f'<div class="also-try-grid">{"".join(cards)}</div>'
+                """,
+                unsafe_allow_html=True,
+            )
+            if st.button(
+                "View Details",
+                key=f"{key_prefix}_{key_slug(drink_id)}_{index}_view_details",
+                use_container_width=True,
+            ):
+                st.session_state.selected_drink_id = drink_id
+                st.session_state.selected_drink = drink_dict
+                if mode == "guided":
+                    _set_flow_step(5)
+                else:
+                    st.session_state.home_view = "details"
+                    st.rerun()
 
 
 def profile_name_exists(name: str) -> dict[str, object] | None:
@@ -2010,7 +2190,10 @@ def render_ingredient_cards(ingredients: pd.DataFrame, limit: int = 24) -> None:
             </div>
             """
         )
-    st.html(f'<div class="ingredient-card-grid">{"".join(cards)}</div>')
+    st.markdown(
+        f'<div class="ingredient-card-grid">{"".join(cards)}</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def _custom_drinks() -> pd.DataFrame:
@@ -2051,11 +2234,13 @@ def render_custom_drink_cards(
             st.markdown(
                 f"""
                 <div class="custom-drink-card">
-                    {drink_image_html(drink_dict, "rail-card-image")}
-                    <div class="custom-drink-body">
-                        <div class="custom-drink-title">{safe_text(drink.get("drink_name", "Custom drink"))}</div>
-                        <div class="custom-drink-meta">{meta}</div>
-                        <div class="recommendation-card-chips">{chips_html(_drink_ingredients(drink_dict, limit=3))}</div>
+                    <div class="card-image-zone">{drink_image_html(drink_dict, "rail-card-image")}</div>
+                    <div class="card-content-zone">
+                        <div class="card-title-zone">{safe_text(drink.get("drink_name", "Custom drink"))}</div>
+                        <div class="card-meta-zone">{meta}</div>
+                        <div class="card-chip-zone">{limited_chips_html(_drink_ingredients(drink_dict, limit=6), limit=3)}</div>
+                        <div class="card-description-zone">{safe_text(_drink_description(drink_dict))}</div>
+                        <div class="card-actions-zone"></div>
                     </div>
                 </div>
                 """,
@@ -2200,11 +2385,13 @@ def render_drink_rail(
             st.markdown(
                 f"""
                 <div class="rail-card">
-                    {drink_image_html(drink_dict, "rail-card-image")}
-                    <div class="rail-card-body">
-                        <div class="rail-card-title">{safe_text(drink.get("drink_name", "Drink"))}</div>
-                        <div class="rail-card-meta">{safe_text(_rail_meta(drink, score_label))}</div>
-                        <div class="card-ingredients">{chips_html(_drink_ingredients(drink_dict, limit=3))}</div>
+                    <div class="card-image-zone">{drink_image_html(drink_dict, "rail-card-image")}</div>
+                    <div class="card-content-zone">
+                        <div class="card-title-zone">{safe_text(drink.get("drink_name", "Drink"))}</div>
+                        <div class="card-meta-zone">{safe_text(_rail_meta(drink, score_label))}</div>
+                        <div class="card-chip-zone">{limited_chips_html(_drink_ingredients(drink_dict, limit=6), limit=3)}</div>
+                        <div class="card-description-zone">{safe_text(_drink_description(drink_dict))}</div>
+                        <div class="card-actions-zone"></div>
                     </div>
                 </div>
                 """,
@@ -2296,7 +2483,10 @@ def render_category_explorer(drinks: pd.DataFrame) -> None:
             </a>
             """
         )
-    st.html(f'<div class="category-grid">{"".join(cards)}</div>')
+    st.markdown(
+        f'<div class="category-grid">{"".join(cards)}</div>',
+        unsafe_allow_html=True,
+    )
 
     selected_category = st.query_params.get("category")
     category = next((item for item in CATEGORY_CARDS if item["key"] == selected_category), None)
@@ -2420,11 +2610,11 @@ def drink_detail_section() -> None:
             unsafe_allow_html=True,
         )
         st.markdown("### Also try")
-        st.markdown(also_try_cards_html(similar, limit=3), unsafe_allow_html=True)
+        render_drink_card_grid(similar, "detail_also_try", limit=3, mode="home")
     with col2:
         st.markdown(detail_summary_html(drink), unsafe_allow_html=True)
         with st.expander("View scoring details"):
-            st.markdown(score_cards_html(drink), unsafe_allow_html=True)
+            render_score_breakdown(drink)
 
         user = st.session_state.current_user
         if st.button("Save to Favorites", use_container_width=True):
@@ -3878,30 +4068,35 @@ def render_guided_recommendation_cards(
     rows = list(matches.head(limit).iterrows())
     for index, (column, (_, drink)) in enumerate(zip(st.columns(len(rows)), rows)):
         with column:
-            with st.container(border=True):
-                st.markdown(
-                    drink_image_html(drink, "card-drink-image"),
-                    unsafe_allow_html=True,
-                )
-                st.markdown(f"### {drink.get('drink_name', 'Recommended drink')}")
-                confidence = drink.get("selector_confidence", None)
-                if confidence is not None and str(confidence) != "nan":
-                    st.markdown(f"**{int(float(confidence))}% confidence**")
-                else:
-                    st.markdown(f"**{_match_percentage(drink.get('recommendation_score'))}% match**")
-                st.caption(str(drink.get("recommendation_summary", _drink_description(drink))))
-                st.markdown(
-                    f'<div class="card-ingredients">{limited_chips_html(_drink_ingredients(drink, limit=6), limit=3)}</div>',
-                    unsafe_allow_html=True,
-                )
-                if st.button(
-                    "View Details",
-                    key=f"{key_prefix}_{key_slug(drink.get('drink_id'))}_{index}_view_details",
-                    use_container_width=True,
-                ):
-                    st.session_state.selected_drink_id = drink.get("drink_id")
-                    st.session_state.selected_drink = drink.to_dict()
-                    _set_flow_step(5)
+            confidence = drink.get("selector_confidence", None)
+            if confidence is not None and str(confidence) != "nan":
+                meta = f"{int(float(confidence))}% confidence"
+            else:
+                meta = f"{_match_percentage(drink.get('recommendation_score'))}% match"
+            description = str(drink.get("recommendation_summary", _drink_description(drink)))
+            st.markdown(
+                f"""
+                <div class="rail-card">
+                    <div class="card-image-zone">{drink_image_html(drink, "rail-card-image")}</div>
+                    <div class="card-content-zone">
+                        <div class="card-title-zone">{safe_text(drink.get("drink_name", "Recommended drink"))}</div>
+                        <div class="card-meta-zone">{safe_text(meta)}</div>
+                        <div class="card-chip-zone">{limited_chips_html(_drink_ingredients(drink, limit=6), limit=3)}</div>
+                        <div class="card-description-zone">{safe_text(description)}</div>
+                        <div class="card-actions-zone"></div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            if st.button(
+                "View Details",
+                key=f"{key_prefix}_{key_slug(drink.get('drink_id'))}_{index}_view_details",
+                use_container_width=True,
+            ):
+                st.session_state.selected_drink_id = drink.get("drink_id")
+                st.session_state.selected_drink = drink.to_dict()
+                _set_flow_step(5)
 
 
 def render_best_recommendation(drink: pd.Series) -> None:
@@ -3967,13 +4162,14 @@ def render_secondary_recommendations(candidates: pd.DataFrame, selected_id: obje
                 st.markdown(
                     f"""
                     <div class="secondary-card">
-                        {drink_image_html(drink, "rail-card-image")}
-                        <div class="recommendation-card-title">{safe_text(drink.get("drink_name", "Drink"))}</div>
-                        <div class="recommendation-card-description">Also close because {safe_text(reason)}</div>
-                        <div class="recommendation-card-chips">
-                            <div class="card-ingredients">{limited_chips_html(_drink_ingredients(drink, limit=6), limit=3)}</div>
+                        <div class="card-image-zone">{drink_image_html(drink, "rail-card-image")}</div>
+                        <div class="card-content-zone">
+                            <div class="card-title-zone">{safe_text(drink.get("drink_name", "Drink"))}</div>
+                            <div class="card-meta-zone">{_match_percentage(drink.get('recommendation_score'))}% match</div>
+                            <div class="card-chip-zone">{limited_chips_html(_drink_ingredients(drink, limit=6), limit=3)}</div>
+                            <div class="card-description-zone">Also close because {safe_text(reason)}</div>
+                            <div class="card-actions-zone"></div>
                         </div>
-                        <div class="recommendation-button-spacer"></div>
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -4046,11 +4242,11 @@ def guided_detail_step() -> None:
             unsafe_allow_html=True,
         )
         st.markdown("### Also try")
-        st.markdown(also_try_cards_html(similar, limit=3), unsafe_allow_html=True)
+        render_drink_card_grid(similar, "guided_also_try", limit=3, mode="guided")
     with col2:
         st.markdown(detail_summary_html(drink), unsafe_allow_html=True)
         with st.expander("View scoring details"):
-            st.markdown(score_cards_html(drink), unsafe_allow_html=True)
+            render_score_breakdown(drink)
 
         rate_col, another_col, favorite_col = st.columns(3)
         with rate_col:
@@ -4281,14 +4477,13 @@ def render_barista_progress() -> None:
             """
             <div class="progress-card">
                 <div class="progress-name">Barista Progress</div>
-                <div class="progress-level">Create or load a profile to start earning XP.</div>
+                <div class="progress-title">Level 1 - New Customer</div>
                 <div class="mug-wrap">
                     <div class="coffee-mug"><div class="coffee-fill" style="--fill: 0%;"></div></div>
-                    <div>
-                        <div class="progress-percent">0% to next level</div>
-                        <div class="progress-xp">0 XP</div>
-                    </div>
+                    <div class="progress-percent">0% to next level</div>
                 </div>
+                <div class="progress-xp">0 XP</div>
+                <div class="progress-stats">Create or load a profile to start earning XP.</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -4301,21 +4496,14 @@ def render_barista_progress() -> None:
     st.sidebar.markdown(
         f"""
         <div class="progress-card">
-            <div class="progress-name">{safe_text(user.get("name", "Profile"))} ({safe_text(user.get("user_id", ""))})</div>
-            <div class="progress-title">{safe_text(progress["title"])}</div>
-            <div class="progress-level">Level {safe_text(progress["level"])}</div>
+            <div class="progress-name">Barista Progress</div>
+            <div class="progress-title">Level {safe_text(progress["level"])} - {safe_text(progress["title"])}</div>
             <div class="mug-wrap">
                 <div class="coffee-mug"><div class="coffee-fill" style="--fill: {fill}%;"></div></div>
-                <div>
-                    <div class="progress-percent">{fill}% to next level</div>
-                    <div class="progress-xp">{safe_text(progress["xp"])} XP</div>
-                </div>
+                <div class="progress-percent">{fill}% to next level</div>
             </div>
-            <div class="progress-stats">
-                <div>{safe_text(progress["drinks_rated"])} drinks rated</div>
-                <div>{safe_text(progress["favorites_saved"])} favorites saved</div>
-                <div>{safe_text(progress["custom_drinks_created"])} custom drinks created</div>
-            </div>
+            <div class="progress-xp">{safe_text(progress["xp"])} XP</div>
+            <div class="progress-stats">{safe_text(progress["drinks_rated"])} rated - {safe_text(progress["favorites_saved"])} saved - {safe_text(progress["custom_drinks_created"])} custom</div>
         </div>
         """,
         unsafe_allow_html=True,
