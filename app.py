@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 from html import escape
 import logging
 import re
-from urllib.parse import quote
 
 import pandas as pd
 import streamlit as st
@@ -85,6 +84,21 @@ def apply_theme() -> None:
 
         [data-testid="stSidebar"] * {
             color: var(--ai-text);
+        }
+
+        [data-testid="stSidebar"] h3 {
+            margin-bottom: 0.25rem;
+        }
+
+        [data-testid="stSidebar"] h4 {
+            margin-top: 1.25rem;
+            margin-bottom: 0.45rem;
+            padding-top: 0.75rem;
+            border-top: 1px solid rgba(118, 86, 58, 0.25);
+        }
+
+        [data-testid="stSidebar"] div[data-testid="stButton"] {
+            margin-bottom: 0.38rem;
         }
 
         .block-container {
@@ -1847,38 +1861,41 @@ def render_drink_card_grid(
         return
 
     rows = list(drinks.head(limit).iterrows())
-    columns = st.columns(len(rows))
-    for index, (column, (_, drink)) in enumerate(zip(columns, rows)):
-        drink_dict = drink.to_dict()
-        drink_id = drink.get("drink_id")
-        with column:
-            st.markdown(
-                f"""
-                <div class="rail-card">
-                    <div class="card-image-zone">{drink_image_html(drink_dict, "rail-card-image")}</div>
-                    <div class="card-content-zone">
-                        <div class="card-title-zone">{safe_text(drink.get("drink_name", "Drink"))}</div>
-                        <div class="card-meta-zone">{safe_text(_rail_meta(drink))}</div>
-                        <div class="card-chip-zone">{limited_chips_html(_drink_ingredients(drink_dict, limit=6), limit=3)}</div>
-                        <div class="card-description-zone">{safe_text(_drink_description(drink_dict))}</div>
-                        <div class="card-actions-zone"></div>
+    for start in range(0, len(rows), 4):
+        row_items = rows[start : start + 4]
+        columns = st.columns(len(row_items))
+        for offset, (column, (_, drink)) in enumerate(zip(columns, row_items)):
+            index = start + offset
+            drink_dict = drink.to_dict()
+            drink_id = drink.get("drink_id")
+            with column:
+                st.markdown(
+                    f"""
+                    <div class="rail-card">
+                        <div class="card-image-zone">{drink_image_html(drink_dict, "rail-card-image")}</div>
+                        <div class="card-content-zone">
+                            <div class="card-title-zone">{safe_text(drink.get("drink_name", "Drink"))}</div>
+                            <div class="card-meta-zone">{safe_text(_rail_meta(drink))}</div>
+                            <div class="card-chip-zone">{limited_chips_html(_drink_ingredients(drink_dict, limit=6), limit=3)}</div>
+                            <div class="card-description-zone">{safe_text(_drink_description(drink_dict))}</div>
+                            <div class="card-actions-zone"></div>
+                        </div>
                     </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            if st.button(
-                "View Details",
-                key=f"{key_prefix}_{key_slug(drink_id)}_{index}_view_details",
-                use_container_width=True,
-            ):
-                st.session_state.selected_drink_id = drink_id
-                st.session_state.selected_drink = drink_dict
-                if mode == "guided":
-                    _set_flow_step(5)
-                else:
-                    st.session_state.home_view = "details"
-                    st.rerun()
+                    """,
+                    unsafe_allow_html=True,
+                )
+                if st.button(
+                    "View Details",
+                    key=f"{key_prefix}_{key_slug(drink_id)}_{index}_view_details",
+                    use_container_width=True,
+                ):
+                    st.session_state.selected_drink_id = drink_id
+                    st.session_state.selected_drink = drink_dict
+                    if mode == "guided":
+                        _set_flow_step(5)
+                    else:
+                        st.session_state.home_view = "details"
+                        st.rerun()
 
 
 def profile_name_exists(name: str) -> dict[str, object] | None:
@@ -2497,17 +2514,21 @@ def _category_matches(drinks: pd.DataFrame, category_key: str) -> pd.DataFrame:
         drinks.get("drink_name", pd.Series(dtype=str)).astype(str).str.lower()
         + " "
         + drinks.get("base", pd.Series(dtype=str)).astype(str).str.lower()
+        + " "
+        + drinks.get("flavor_profile", pd.Series(dtype=str)).astype(str).str.lower()
     )
     if category_key == "espresso":
-        shots = pd.to_numeric(drinks.get("espresso_shots", 0), errors="coerce").fillna(0)
-        mask = text.str.contains("espresso|americano|cappuccino", na=False) | (shots > 0)
+        mask = text.str.contains("espresso|americano|shaken espresso", na=False)
     elif category_key == "lattes":
-        mask = text.str.contains("latte", na=False) & ~text.str.contains(
-            "matcha|chai",
+        mask = text.str.contains("latte|flat white|cappuccino", na=False) & ~text.str.contains(
+            "matcha|chai|refresher",
             na=False,
         )
     elif category_key == "refreshers":
-        mask = text.str.contains("refresher", na=False)
+        mask = text.str.contains(
+            "refresher|fruit|mango|strawberry|pineapple|lemonade|berry|acai|passionfruit|dragonfruit",
+            na=False,
+        )
     elif category_key == "matcha":
         mask = text.str.contains("matcha", na=False)
     elif category_key == "cold_brew":
@@ -2517,40 +2538,9 @@ def _category_matches(drinks: pd.DataFrame, category_key: str) -> pd.DataFrame:
     return drinks[mask].copy()
 
 
-def render_category_explorer(drinks: pd.DataFrame) -> None:
-    """Render clickable category cards and selected category drinks."""
-    st.markdown('<div class="home-section-title">Explore Categories</div>', unsafe_allow_html=True)
-    cards = []
-    for category in CATEGORY_CARDS:
-        sample = category["sample"]
-        href = f"?category={quote(category['key'])}"
-        cards.append(
-            f"""
-            <a class="category-card" href="{href}">
-                {drink_image_html(sample, "category-card-image")}
-                <div class="category-card-body">
-                    <div class="category-card-title">{safe_text(category["name"])}</div>
-                    <div class="category-card-description">{safe_text(category["description"])}</div>
-                </div>
-            </a>
-            """
-        )
-    st.markdown(
-        f'<div class="category-grid">{"".join(cards)}</div>',
-        unsafe_allow_html=True,
-    )
-
-    selected_category = st.query_params.get("category")
-    category = next((item for item in CATEGORY_CARDS if item["key"] == selected_category), None)
-    if category:
-        matches = _category_matches(drinks, category["key"])
-        render_drink_rail(
-            f"{category['name']} Picks",
-            matches,
-            f"category_{category['key']}",
-            empty_text=f"No {category['name'].lower()} drinks are available yet.",
-        )
-        st.markdown('<a class="ai-card-meta" href="?">Clear category</a>', unsafe_allow_html=True)
+def legacy_category_explorer_html_unused(drinks: pd.DataFrame) -> None:
+    """Deprecated category renderer kept unused for historical reference."""
+    return
 
 
 def render_category_explorer(drinks: pd.DataFrame) -> None:
@@ -2572,21 +2562,26 @@ def render_category_explorer(drinks: pd.DataFrame) -> None:
                     use_container_width=True,
                 ):
                     st.session_state.selected_category = category["key"]
+                    st.session_state.selected_page = "category"
                     st.rerun()
 
-    selected_category = st.session_state.get("selected_category")
-    category = next((item for item in CATEGORY_CARDS if item["key"] == selected_category), None)
-    if category:
-        matches = _category_matches(drinks, category["key"])
-        render_drink_rail(
-            f"{category['name']} Picks",
-            matches,
-            f"category_{category['key']}",
-            empty_text=f"No {category['name'].lower()} drinks are available yet.",
-        )
-        if st.button("Clear category", key="clear_home_category"):
-            st.session_state.selected_category = None
-            st.rerun()
+
+def category_page() -> None:
+    """Render a dedicated drink catalogue for the selected sidebar category."""
+    category_key = st.session_state.get("selected_category") or "espresso"
+    category = next(
+        (item for item in CATEGORY_CARDS if item["key"] == category_key),
+        CATEGORY_CARDS[0],
+    )
+    st.markdown(f"## {category['name']}")
+    st.caption(category["description"])
+    matches = _category_matches(st.session_state.drinks, category["key"])
+    render_drink_card_grid(
+        matches,
+        f"category_page_{category['key']}",
+        limit=12,
+        mode="home",
+    )
 
 
 def homepage_rail_data() -> dict[str, pd.DataFrame]:
@@ -3774,7 +3769,6 @@ def home_actions() -> None:
         "rail_favorites",
         empty_text="Save favorite drinks and they will appear here.",
     )
-    render_category_explorer(st.session_state.drinks)
 
 
 def guided_welcome_step() -> None:
@@ -4478,23 +4472,15 @@ def render_sidebar_categories() -> None:
     """Render compact category navigation in the sidebar."""
     st.sidebar.markdown("#### Explore Categories")
     for category in CATEGORY_CARDS:
-        selected = st.session_state.get("selected_category") == category["key"]
         label = f"{category['name']}"
-        if selected:
-            label = f"{category['name']} selected"
         if st.sidebar.button(
             label,
             key=f"sidebar_category_{category['key']}",
             use_container_width=True,
         ):
             st.session_state.selected_category = category["key"]
-            st.session_state.selected_page = "home"
+            st.session_state.selected_page = "category"
             st.session_state.home_view = "recommend"
-            st.rerun()
-    if st.session_state.get("selected_category"):
-        if st.sidebar.button("Clear category", key="sidebar_clear_category", use_container_width=True):
-            st.session_state.selected_category = None
-            st.session_state.selected_page = "home"
             st.rerun()
 
 
@@ -4571,15 +4557,12 @@ def sidebar_navigation() -> None:
         _go_to_page("home")
     if st.sidebar.button("My Profile", key="nav_profile", use_container_width=True):
         _go_to_page("profile")
-    if st.session_state.current_user:
-        if st.sidebar.button(
-            "Recommendation",
-            key="nav_recommendation",
-            use_container_width=True,
-        ):
-            _start_recommendation()
-        if st.sidebar.button("Advanced Tools", key="nav_advanced", use_container_width=True):
-            _go_to_page("advanced")
+    if st.sidebar.button(
+        "Recommendation",
+        key="nav_recommendation",
+        use_container_width=True,
+    ):
+        _start_recommendation()
     render_sidebar_categories()
     st.sidebar.markdown('<div class="sidebar-progress-push"></div>', unsafe_allow_html=True)
     render_barista_progress()
@@ -4626,34 +4609,6 @@ def render_barista_progress() -> None:
     )
 
 
-def advanced_tools_section(expanded: bool = False) -> None:
-    """Render advanced customization and database tools."""
-    with st.expander(
-        "Advanced Tools · Admin and debug utilities.",
-        expanded=expanded,
-    ):
-        st.caption("Maintenance utilities and data inspection for debugging.")
-        advanced = st.tabs(
-            [
-                "Ingredient List",
-                "Rule-based recommendations",
-                "Rate drink",
-                "Rating history",
-                "Taste profile",
-            ]
-        )
-        with advanced[0]:
-            ingredient_list_section()
-        with advanced[1]:
-            recommendation_section()
-        with advanced[2]:
-            rate_drink_section()
-        with advanced[3]:
-            rating_history_section()
-        with advanced[4]:
-            taste_profile_section()
-
-
 def main() -> None:
     """Run the Streamlit app."""
     st.set_page_config(page_title="AI Barista", layout="wide")
@@ -4668,7 +4623,10 @@ def main() -> None:
         )
 
     page = st.session_state.selected_page
-    if not st.session_state.current_user and page in {"advanced", "guided"}:
+    if not st.session_state.current_user and page in {"guided"}:
+        page = "home"
+        st.session_state.selected_page = "home"
+    if page == "advanced":
         page = "home"
         st.session_state.selected_page = "home"
     if page == "home":
@@ -4678,14 +4636,13 @@ def main() -> None:
             home_actions()
     elif page == "profile":
         my_profile_page()
-    elif page == "advanced":
-        st.markdown("## Advanced Tools")
-        advanced_tools_section(expanded=True)
+    elif page == "category":
+        if st.session_state.home_view == "details" and st.session_state.selected_drink_id:
+            drink_detail_section()
+        else:
+            category_page()
     else:
         guided_flow()
-
-    if st.session_state.current_user and page != "advanced":
-        advanced_tools_section(expanded=False)
 
 
 if __name__ == "__main__":
