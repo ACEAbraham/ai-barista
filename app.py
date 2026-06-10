@@ -711,6 +711,10 @@ def apply_theme() -> None:
             box-shadow: none;
         }
 
+        .sidebar-progress-push {
+            height: clamp(1.5rem, 10vh, 5.5rem);
+        }
+
         .progress-name {
             color: var(--ai-text);
             font-weight: 900;
@@ -1446,6 +1450,10 @@ def apply_theme() -> None:
             .also-try-grid {
                 grid-template-columns: 1fr;
             }
+
+            .sidebar-progress-push {
+                height: 0.75rem;
+            }
         }
         </style>
         """.replace("__HERO_IMAGE_URL__", HERO_IMAGE_URL),
@@ -1520,6 +1528,8 @@ def initialize_state() -> None:
         st.session_state.recommendation_fallback_message = None
     if "duplicate_profile_to_load" not in st.session_state:
         st.session_state.duplicate_profile_to_load = None
+    if "selected_category" not in st.session_state:
+        st.session_state.selected_category = None
 
 
 def save_warning() -> None:
@@ -1788,10 +1798,20 @@ def detail_summary_html(drink: object) -> str:
     )
     preference_chips = limited_chips_html(_list_field(data.get("matched_preferences")), limit=5, css_class="detail-badge")
     context_chips = limited_chips_html(_list_field(data.get("matched_context")), limit=5, css_class="detail-badge")
+    creator_section = ""
+    if str(data.get("drink_id", "")).startswith("CUS-"):
+        creator = data.get("creator_name") or "Unknown"
+        creator_section = f"""
+        <div class="detail-section">
+            <div class="detail-section-title">Creator</div>
+            <div class="detail-description">Created by {safe_text(creator)}</div>
+        </div>
+        """
     return f"""
         <div class="detail-title">{safe_text(data.get("drink_name", "Drink details"))}</div>
         <div class="detail-score-pill">{safe_text(score_text)}</div>
         <div class="detail-description">{safe_text(_drink_description(data))}</div>
+        {creator_section}
         <div class="detail-section">
             <div class="detail-section-title">Why this was recommended</div>
             <div class="detail-description">{safe_text(reason)}</div>
@@ -2154,18 +2174,28 @@ def render_recently_rated_section(user_id: str, limit: int = 6) -> None:
     render_drink_rail("Recently Rated Drinks", drinks, "profile_recent", limit=limit, score_column="rating")
 
 
-def render_custom_creations_section(limit: int = 6) -> None:
+def render_custom_creations_section(limit: int = 6, user_id: str | None = None) -> None:
     """Render custom drinks as compact cards."""
     custom = st.session_state.drinks[
         st.session_state.drinks["drink_id"].astype(str).str.startswith("CUS-")
-    ].head(limit)
-    render_drink_rail(
-        "Custom Creations",
-        custom,
-        "profile_custom",
-        limit=limit,
-        empty_text="Create a custom drink and it will appear here.",
-    )
+    ].copy()
+    title = "Custom Creations"
+    empty_text = "Create a custom drink and it will appear here."
+    if user_id:
+        title = "My Custom Drinks"
+        empty_text = "Create a custom drink and it will appear here."
+        if "creator_user_id" in custom.columns:
+            custom = custom[
+                custom["creator_user_id"].fillna("").astype(str).str.lower()
+                == str(user_id).lower()
+            ]
+        else:
+            custom = custom.iloc[0:0]
+    st.markdown(f"### {title}")
+    if custom.empty:
+        st.info(empty_text)
+        return
+    render_custom_drink_cards(custom.head(limit), "profile_custom", limit=limit)
 
 
 def render_ingredient_cards(ingredients: pd.DataFrame, limit: int = 24) -> None:
@@ -2196,6 +2226,28 @@ def render_ingredient_cards(ingredients: pd.DataFrame, limit: int = 24) -> None:
     )
 
 
+def render_ingredient_cards(ingredients: pd.DataFrame, limit: int = 24) -> None:
+    """Render ingredients as native cards so raw HTML never appears."""
+    if ingredients.empty:
+        st.info("No ingredients found.")
+        return
+    rows = list(ingredients.head(limit).iterrows())
+    for start in range(0, len(rows), 4):
+        row_items = rows[start : start + 4]
+        columns = st.columns(len(row_items))
+        for column, (_, ingredient) in zip(columns, row_items):
+            calories = _safe_float(ingredient.get("calories", 0))
+            caffeine = _safe_float(ingredient.get("caffeine", 0))
+            price = _safe_float(ingredient.get("price", 0))
+            with column:
+                with st.container(border=True):
+                    st.markdown(f"**{ingredient.get('ingredient_name', 'Ingredient')}**")
+                    st.caption(str(ingredient.get("category", "category")))
+                    st.write(f"{calories:g} cal")
+                    st.write(f"{caffeine:g} mg caffeine")
+                    st.write(f"${price:.2f} per {ingredient.get('default_unit', 'serving')}")
+
+
 def _custom_drinks() -> pd.DataFrame:
     """Return saved user-created drinks from the loaded drink catalog."""
     drinks = st.session_state.drinks
@@ -2219,12 +2271,12 @@ def render_custom_drink_cards(
     for index, (column, (_, drink)) in enumerate(zip(columns * ((len(rows) // len(columns)) + 1), rows)):
         drink_dict = drink.to_dict()
         drink_id = drink.get("drink_id")
-        creator = drink.get("creator_name") or drink.get("created_by") or "AI Barista community"
+        creator = drink.get("creator_name") or drink.get("created_by") or "Unknown"
         rating_label = ""
         if "avg_rating" in drink and not pd.isna(drink.get("avg_rating")):
             rating_label = f"Rating {float(drink.get('avg_rating')):.1f}/5"
         meta = (
-            f"{safe_text(creator)}<br>"
+            f"Created by {safe_text(creator)}<br>"
             f"{safe_text(drink.get('caffeine_level', 'unknown'))} caffeine · "
             f"{safe_text(drink.get('sweetness_level', 'classic'))} sweetness"
         )
@@ -2499,6 +2551,42 @@ def render_category_explorer(drinks: pd.DataFrame) -> None:
             empty_text=f"No {category['name'].lower()} drinks are available yet.",
         )
         st.markdown('<a class="ai-card-meta" href="?">Clear category</a>', unsafe_allow_html=True)
+
+
+def render_category_explorer(drinks: pd.DataFrame) -> None:
+    """Render category discovery with native Streamlit cards and buttons."""
+    st.markdown("### Explore Categories")
+    columns = st.columns(len(CATEGORY_CARDS))
+    for column, category in zip(columns, CATEGORY_CARDS):
+        with column:
+            with st.container(border=True):
+                st.image(
+                    drink_image_url(category["sample"]),
+                    caption=category["name"],
+                    use_container_width=True,
+                )
+                st.caption(category["description"])
+                if st.button(
+                    f"View {category['name']}",
+                    key=f"home_category_{category['key']}",
+                    use_container_width=True,
+                ):
+                    st.session_state.selected_category = category["key"]
+                    st.rerun()
+
+    selected_category = st.session_state.get("selected_category")
+    category = next((item for item in CATEGORY_CARDS if item["key"] == selected_category), None)
+    if category:
+        matches = _category_matches(drinks, category["key"])
+        render_drink_rail(
+            f"{category['name']} Picks",
+            matches,
+            f"category_{category['key']}",
+            empty_text=f"No {category['name'].lower()} drinks are available yet.",
+        )
+        if st.button("Clear category", key="clear_home_category"):
+            st.session_state.selected_category = None
+            st.rerun()
 
 
 def homepage_rail_data() -> dict[str, pd.DataFrame]:
@@ -3358,6 +3446,8 @@ def custom_drink_section(show_catalog: bool = True) -> None:
         custom_drink["espresso_shots"] = int(espresso_shots)
         custom_drink["caffeine_level"] = caffeine_level
         custom_drink["sweetness_level"] = sweetness_level
+        custom_drink["creator_user_id"] = user["user_id"] if user else "guest"
+        custom_drink["creator_name"] = user["name"] if user else "Guest"
         if calories_override > 0:
             custom_drink["calories"] = calories_override
         if dietary_tags.strip():
@@ -4379,9 +4469,33 @@ def guided_profile_summary_step() -> None:
     render_taste_profile_cards(user["user_id"])
     render_favorites_section(user["user_id"])
     render_recently_rated_section(user["user_id"])
-    render_custom_creations_section()
+    render_custom_creations_section(user_id=user["user_id"])
     if st.button("Get another recommendation", type="primary", use_container_width=True):
         _set_flow_step(3)
+
+
+def render_sidebar_categories() -> None:
+    """Render compact category navigation in the sidebar."""
+    st.sidebar.markdown("#### Explore Categories")
+    for category in CATEGORY_CARDS:
+        selected = st.session_state.get("selected_category") == category["key"]
+        label = f"{category['name']}"
+        if selected:
+            label = f"{category['name']} selected"
+        if st.sidebar.button(
+            label,
+            key=f"sidebar_category_{category['key']}",
+            use_container_width=True,
+        ):
+            st.session_state.selected_category = category["key"]
+            st.session_state.selected_page = "home"
+            st.session_state.home_view = "recommend"
+            st.rerun()
+    if st.session_state.get("selected_category"):
+        if st.sidebar.button("Clear category", key="sidebar_clear_category", use_container_width=True):
+            st.session_state.selected_category = None
+            st.session_state.selected_page = "home"
+            st.rerun()
 
 
 def guided_flow() -> None:
@@ -4446,7 +4560,7 @@ def my_profile_page() -> None:
     render_taste_profile_cards(user["user_id"])
     render_favorites_section(user["user_id"])
     render_recently_rated_section(user["user_id"])
-    render_custom_creations_section()
+    render_custom_creations_section(user_id=user["user_id"])
 
 
 def sidebar_navigation() -> None:
@@ -4466,6 +4580,8 @@ def sidebar_navigation() -> None:
             _start_recommendation()
         if st.sidebar.button("Advanced Tools", key="nav_advanced", use_container_width=True):
             _go_to_page("advanced")
+    render_sidebar_categories()
+    st.sidebar.markdown('<div class="sidebar-progress-push"></div>', unsafe_allow_html=True)
     render_barista_progress()
 
 

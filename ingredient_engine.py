@@ -31,6 +31,8 @@ CUSTOM_DRINK_COLUMNS = [
     "toppings",
     "ice_level",
     "flavor_score",
+    "creator_user_id",
+    "creator_name",
 ]
 RATING_COLUMNS = ["user_id", "drink_id", "rating", "would_order_again"]
 INGREDIENT_COLUMNS = [
@@ -489,7 +491,21 @@ def save_custom_drink_recipe(
     recipe_items: list[dict[str, object]],
 ) -> None:
     """Save a custom drink to Supabase and its ingredient recipe locally."""
-    insert_row("custom_drinks", custom_drink)
+    try:
+        insert_row("custom_drinks", custom_drink)
+    except Exception as error:
+        if "creator_user_id" not in custom_drink and "creator_name" not in custom_drink:
+            raise
+        LOGGER.warning(
+            "Custom drink creator fields were not accepted by Supabase; retrying legacy insert: %s",
+            error,
+        )
+        legacy_drink = {
+            key: value
+            for key, value in custom_drink.items()
+            if key not in {"creator_user_id", "creator_name"}
+        }
+        insert_row("custom_drinks", legacy_drink)
 
     recipes = load_recipes()
     recipe_rows = [
